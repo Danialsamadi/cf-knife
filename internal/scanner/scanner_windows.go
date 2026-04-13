@@ -1,5 +1,5 @@
-//go:build !windows
-// +build !windows
+//go:build windows
+// +build windows
 
 package scanner
 
@@ -9,15 +9,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	pbar "github.com/elulcao/progress-bar/cmd"
 )
 
-const pbarScale = 10000
-
-// Run dispatches all targets across a bounded worker pool with optional
-// global and per-worker rate limiting. It blocks until every target has
-// been probed or ctx is cancelled.
+// Run on Windows: dispatches all targets across a bounded worker pool without progress bar
+// (progress-bar library has syscall incompatibilities on Windows)
 func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	results := make([]ProbeResult, len(targets))
 	jobs := make(chan int, s.Threads)
@@ -34,41 +29,24 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	var completed atomic.Int64
 	var tcpOK, tlsOK, httpOK, h2OK, errCount atomic.Int64
 	total := int64(len(targets))
-	scanDone := make(chan struct{})
 	start := time.Now()
 
-	// Progress bar + live stats (elulcao/progress-bar).
-	var pb *pbar.PBar
+	// Windows: simplified stats output without progress bar (due to syscall issues)
 	if s.Progress {
-		pb = pbar.NewPBar()
-		pb.Total = pbarScale
-		pb.DoneStr = "█"
-		pb.OngoingStr = "░"
-
 		go func() {
-			barTicker := time.NewTicker(150 * time.Millisecond)
 			statsTicker := time.NewTicker(3 * time.Second)
-			defer barTicker.Stop()
 			defer statsTicker.Stop()
 			for {
 				select {
-				case <-barTicker.C:
-					n := completed.Load()
-					scaled := int(n * pbarScale / total)
-					pb.RenderPBar(scaled)
 				case <-statsTicker.C:
 					n := completed.Load()
 					secs := time.Since(start).Seconds()
 					rate := float64(n) / secs
-					pb.Println(fmt.Sprintf(
-						"  \033[36m%d/%d\033[0m scanned | \033[32mTCP:%d TLS:%d HTTP:%d H2:%d\033[0m | \033[31merr:%d\033[0m | %.0f/s",
+					fmt.Printf("  %d/%d scanned | TCP:%d TLS:%d HTTP:%d H2:%d | err:%d | %.0f/s\n",
 						n, total,
 						tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(),
 						errCount.Load(), rate,
-					))
-				case <-scanDone:
-					pb.RenderPBar(pbarScale)
-					return
+					)
 				}
 			}
 		}()
@@ -145,13 +123,6 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	}
 	close(jobs)
 	wg.Wait()
-
-	close(scanDone)
-	if pb != nil {
-		time.Sleep(200 * time.Millisecond)
-		pb.CleanUp()
-		fmt.Println()
-	}
 
 	elapsed := time.Since(start)
 	fmt.Printf("\n  Scan complete in %s — %d targets scanned\n", elapsed.Round(time.Millisecond), total)

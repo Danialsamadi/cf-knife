@@ -53,3 +53,15 @@ const (
 	ScanFast    ScanType = "fast"
 	ScanSYN     ScanType = "syn"
 )
+
+// Scanner coordinates the concurrent probing of targets.
+type Scanner struct {
+	Threads   int
+	Config    *ProbeConfig
+	Rate      int // global ops/sec; 0 = unlimited
+	RateLimit int // per-worker ops/sec; 0 = unlimited
+	Progress  bool
+	Verbose   bool
+
+	Results []ProbeResult
+}
