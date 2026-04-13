@@ -42,10 +42,6 @@ jobs:
             arch: amd64
             runner: windows-latest
             output: cf-knife-windows-amd64.exe
-          - os: windows
-            arch: 386
-            runner: windows-latest
-            output: cf-knife-windows-386.exe
 
     steps:
       - name: Checkout code
