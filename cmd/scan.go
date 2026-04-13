@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os/signal"
+	"syscall"
 
 	"cf-knife/internal/config"
+	"cf-knife/internal/scanner"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -53,13 +57,10 @@ func init() {
 
 func runScan(cmd *cobra.Command, args []string) error {
 	v := viper.New()
-
-	// Bind all cobra flags so Viper sees CLI values.
 	if err := v.BindPFlags(cmd.Flags()); err != nil {
 		return fmt.Errorf("bind flags: %w", err)
 	}
 
-	// If --config is set, load the JSON file first; CLI flags override.
 	if cfgPath := v.GetString("config"); cfgPath != "" {
 		v.SetConfigFile(cfgPath)
 		if err := v.MergeInConfig(); err != nil {
@@ -72,7 +73,6 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// --save-config: persist merged config and exit.
 	if cfg.SaveConfig {
 		savePath := "cf-knife-config.json"
 		if cfg.ConfigFile != "" {
@@ -85,7 +85,59 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	_ = cfg // will be used in next phase
-	fmt.Println("cf-knife scan: config loaded, scanning not yet wired")
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Load targets.
+	if cfg.Verbose {
+		fmt.Println("loading targets...")
+	}
+	targets, err := scanner.LoadTargets(ctx, cfg.IPs, cfg.InputFile, cfg.Ports,
+		cfg.IPv4Only, cfg.IPv6Only, cfg.Shuffle)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("loaded %d targets (%d IPs × %d ports)\n",
+		len(targets), len(targets)/maxInt(len(cfg.Ports), 1), len(cfg.Ports))
+
+	pc := &scanner.ProbeConfig{
+		SNI:        cfg.SNI,
+		Timeout:    cfg.Timeout,
+		Retries:    cfg.Retries,
+		Mode:       scanner.ScanMode(cfg.Mode),
+		TestTCP:    cfg.TestTCP,
+		TestTLS:    cfg.TestTLS,
+		TestHTTP:   cfg.TestHTTP,
+		TestHTTP2:  cfg.TestHTTP2,
+		HTTPURL:    cfg.HTTPURL,
+		MaxLatency: cfg.MaxLatency,
+		ScanType:   scanner.ScanType(cfg.ScanType),
+	}
+
+	sc := &scanner.Scanner{
+		Threads: cfg.Threads,
+		Config:  pc,
+	}
+
+	fmt.Println("scanning...")
+	sc.Run(ctx, targets)
+
+	// Filter by max latency and success.
+	var clean []scanner.ProbeResult
+	for _, r := range sc.Results {
+		if r.TCPSuccess && r.Latency <= cfg.MaxLatency {
+			clean = append(clean, r)
+		}
+	}
+	fmt.Printf("scan complete: %d/%d targets passed\n", len(clean), len(targets))
+
+	_ = clean // output phase will consume this
 	return nil
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
