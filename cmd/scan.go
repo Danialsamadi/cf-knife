@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"cf-knife/internal/config"
+	"cf-knife/internal/output"
 	"cf-knife/internal/scanner"
 
 	"github.com/spf13/cobra"
@@ -120,7 +122,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("scanning...")
+	start := time.Now()
 	sc.Run(ctx, targets)
+	elapsed := time.Since(start)
 
 	// Filter by max latency and success.
 	var clean []scanner.ProbeResult
@@ -129,9 +133,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 			clean = append(clean, r)
 		}
 	}
-	fmt.Printf("scan complete: %d/%d targets passed\n", len(clean), len(targets))
 
-	_ = clean // output phase will consume this
+	if err := output.Write(clean, cfg.Output, cfg.OutputFmt, elapsed); err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
 	return nil
 }
 
