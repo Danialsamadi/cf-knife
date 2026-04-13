@@ -62,16 +62,35 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	addr := net.JoinHostPort(t.IP, t.Port)
 	start := time.Now()
 
-	// TCP
+	// TCP — dispatch based on scan type
 	if pc.ShouldTCP() {
-		if err := retry(ctx, pc.Retries, func() error {
-			return probeTCP(ctx, addr, pc.Timeout)
-		}); err != nil {
-			res.Error = fmt.Sprintf("tcp: %v", err)
-			res.Latency = time.Since(start)
-			return res
+		switch pc.ScanType {
+		case ScanSYN:
+			ok, warning := ProbeSYN(ctx, addr, pc.Timeout)
+			WarnSYNFallback(warning)
+			if !ok {
+				res.Error = "tcp/syn: port closed or unreachable"
+				res.Latency = time.Since(start)
+				return res
+			}
+			res.TCPSuccess = true
+		case ScanFast:
+			if err := ProbeFast(ctx, addr, pc.Timeout/2); err != nil {
+				res.Error = fmt.Sprintf("tcp/fast: %v", err)
+				res.Latency = time.Since(start)
+				return res
+			}
+			res.TCPSuccess = true
+		default: // ScanConnect
+			if err := retry(ctx, pc.Retries, func() error {
+				return probeTCP(ctx, addr, pc.Timeout)
+			}); err != nil {
+				res.Error = fmt.Sprintf("tcp: %v", err)
+				res.Latency = time.Since(start)
+				return res
+			}
+			res.TCPSuccess = true
 		}
-		res.TCPSuccess = true
 	}
 
 	// TLS
