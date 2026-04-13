@@ -3,7 +3,10 @@ package cmd
 import (
 	"fmt"
 
+	"cf-knife/internal/config"
+
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var scanCmd = &cobra.Command{
@@ -49,6 +52,40 @@ func init() {
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
-	fmt.Println("cf-knife scan: not yet implemented (skeleton)")
+	v := viper.New()
+
+	// Bind all cobra flags so Viper sees CLI values.
+	if err := v.BindPFlags(cmd.Flags()); err != nil {
+		return fmt.Errorf("bind flags: %w", err)
+	}
+
+	// If --config is set, load the JSON file first; CLI flags override.
+	if cfgPath := v.GetString("config"); cfgPath != "" {
+		v.SetConfigFile(cfgPath)
+		if err := v.MergeInConfig(); err != nil {
+			return fmt.Errorf("read config file %q: %w", cfgPath, err)
+		}
+	}
+
+	cfg, err := config.Load(v)
+	if err != nil {
+		return err
+	}
+
+	// --save-config: persist merged config and exit.
+	if cfg.SaveConfig {
+		savePath := "cf-knife-config.json"
+		if cfg.ConfigFile != "" {
+			savePath = cfg.ConfigFile
+		}
+		if err := cfg.Save(savePath); err != nil {
+			return err
+		}
+		fmt.Printf("config saved to %s\n", savePath)
+		return nil
+	}
+
+	_ = cfg // will be used in next phase
+	fmt.Println("cf-knife scan: config loaded, scanning not yet wired")
 	return nil
 }
