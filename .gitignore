@@ -1,0 +1,39 @@
+# Binaries
+cf-knife
+cf-knife.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test output
+*.test
+*.out
+coverage.html
+
+# Build
+dist/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Output files from scans
+clean_ips.txt
+clean_list.txt
+*.csv
+*.json
+
+# Agent / cursor internals
+.agents/
+.cursor/
+mcps/
+skills-lock.json
+agent-transcripts/
