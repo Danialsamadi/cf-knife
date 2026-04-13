@@ -92,18 +92,24 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 			res.TCPSuccess = true
 		}
 	}
+	res.Latency = time.Since(start)
+
+	if pc.MaxLatency > 0 && res.Latency > pc.MaxLatency {
+		return res
+	}
+
+	isTLSPort := t.Port != "80"
 
 	// TLS
 	var tlsConn *tls.Conn
-	if pc.ShouldTLS() {
+	if pc.ShouldTLS() && isTLSPort {
 		var err error
 		tlsConn, err = retryTLS(ctx, pc.Retries, addr, pc.SNI, pc.Timeout)
 		if err != nil {
 			res.Error = fmt.Sprintf("tls: %v", err)
-			res.Latency = time.Since(start)
 			if !res.TCPSuccess {
-				// TCP wasn't tested separately; mark it as OK since we got far enough.
 				res.TCPSuccess = true
+				res.Latency = time.Since(start)
 			}
 			return res
 		}
@@ -118,7 +124,7 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	}
 
 	// HTTP/1.1
-	if pc.ShouldHTTP() {
+	if pc.ShouldHTTP() && isTLSPort {
 		hdrs, err := retryVal(ctx, pc.Retries, func() (http.Header, error) {
 			return probeHTTP(ctx, addr, pc.SNI, pc.Timeout, pc.HTTPURL)
 		})
@@ -131,7 +137,7 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	}
 
 	// HTTP/2
-	if pc.ShouldHTTP2() {
+	if pc.ShouldHTTP2() && isTLSPort {
 		hdrs, err := retryVal(ctx, pc.Retries, func() (http.Header, error) {
 			return probeHTTP2(ctx, addr, pc.SNI, pc.Timeout, pc.HTTPURL)
 		})
@@ -153,7 +159,6 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		RunCloudflareScript(ctx, &res, pc.SNI, pc.Timeout)
 	}
 
-	res.Latency = time.Since(start)
 	return res
 }
 

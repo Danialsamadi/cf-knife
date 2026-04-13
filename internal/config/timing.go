@@ -23,9 +23,9 @@ func Timing(level int) TimingPreset {
 	case 3: // normal (default)
 		return TimingPreset{Threads: 200, Timeout: 3 * time.Second, MaxLatency: 800 * time.Millisecond, Rate: 0}
 	case 4: // aggressive
-		return TimingPreset{Threads: 500, Timeout: 2 * time.Second, MaxLatency: 500 * time.Millisecond, Rate: 0}
+		return TimingPreset{Threads: 2000, Timeout: 2 * time.Second, MaxLatency: 500 * time.Millisecond, Rate: 0}
 	case 5: // insane
-		return TimingPreset{Threads: 2000, Timeout: 1 * time.Second, MaxLatency: 300 * time.Millisecond, Rate: 0}
+		return TimingPreset{Threads: 8000, Timeout: 1 * time.Second, MaxLatency: 300 * time.Millisecond, Rate: 0}
 	default:
 		return Timing(3)
 	}

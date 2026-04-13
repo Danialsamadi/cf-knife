@@ -29,7 +29,7 @@ func init() {
 	f := scanCmd.Flags()
 	f.StringP("port", "p", "443,80,8443,2053,2083", "comma-separated ports")
 	f.String("sni", "www.cloudflare.com", "SNI hostname for TLS handshake")
-	f.IntP("threads", "t", 200, "number of concurrent workers (1-2000)")
+	f.IntP("threads", "t", 200, "number of concurrent workers (1-10000)")
 	f.Duration("timeout", 3_000_000_000, "per-probe timeout") // 3s
 	f.Int("retries", 2, "number of retries per probe")
 	f.String("mode", "full", "probe mode: tcp-only|tls|http|http2|full")

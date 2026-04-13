@@ -91,8 +91,8 @@ func Load(v *viper.Viper) (*Config, error) {
 
 // Validate checks semantic constraints that flag parsing alone cannot enforce.
 func (c *Config) Validate() error {
-	if c.Threads < 1 || c.Threads > 2000 {
-		return fmt.Errorf("--threads must be between 1 and 2000, got %d", c.Threads)
+	if c.Threads < 1 || c.Threads > 10000 {
+		return fmt.Errorf("--threads must be between 1 and 10000, got %d", c.Threads)
 	}
 	if c.Timing < 0 || c.Timing > 5 {
 		return fmt.Errorf("--timing must be between 0 and 5, got %d", c.Timing)

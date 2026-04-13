@@ -87,7 +87,7 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 
 				n := completed.Add(1)
 				if bar != nil {
-					bar.Set(int(n))
+					bar.Add(1)
 				}
 				if s.Verbose && n%500 == 0 {
 					elapsed := time.Since(start).Seconds()
