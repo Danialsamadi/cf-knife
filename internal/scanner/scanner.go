@@ -7,7 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/schollz/progressbar/v3"
+	"github.com/hedzr/is/term/color"
+	"github.com/hedzr/progressbar/v2"
 )
 
 // Scanner coordinates the concurrent probing of targets.
@@ -38,21 +39,43 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 		defer globalTicker.Stop()
 	}
 
-	// Progress bar.
-	var bar *progressbar.ProgressBar
+	var completed atomic.Int64
+	total := int64(len(targets))
+	scanDone := make(chan struct{})
+
+	// Progress bar (hedzr/progressbar).
+	var mpb progressbar.MultiPB
 	if s.Progress {
-		bar = progressbar.NewOptions(len(targets),
-			progressbar.OptionSetDescription("scanning"),
-			progressbar.OptionSetWidth(40),
-			progressbar.OptionShowCount(),
-			progressbar.OptionShowIts(),
-			progressbar.OptionSetItsString("targets"),
-			progressbar.OptionThrottle(200*time.Millisecond),
-			progressbar.OptionClearOnFinish(),
+		color.Hide()
+		mpb = progressbar.New()
+		mpb.Add(total, "scanning",
+			progressbar.WithBarStepper(0),
+			progressbar.WithBarWorker(func(bar progressbar.MiniResizeableBar, exitCh <-chan struct{}) bool {
+				ticker := time.NewTicker(200 * time.Millisecond)
+				defer ticker.Stop()
+				var lastN int64
+				for {
+					select {
+					case <-ticker.C:
+						n := completed.Load()
+						if delta := n - lastN; delta > 0 {
+							bar.Step(delta)
+							lastN = n
+						}
+					case <-scanDone:
+						n := completed.Load()
+						if delta := n - lastN; delta > 0 {
+							bar.Step(delta)
+						}
+						return false
+					case <-exitCh:
+						return true
+					}
+				}
+			}),
 		)
 	}
 
-	var completed atomic.Int64
 	start := time.Now()
 
 	var wg sync.WaitGroup
@@ -74,7 +97,6 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 				if ctx.Err() != nil {
 					return
 				}
-				// Per-worker rate gate.
 				if workerTick != nil {
 					select {
 					case <-workerTick:
@@ -84,11 +106,7 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 				}
 
 				results[idx] = Probe(ctx, targets[idx], s.Config)
-
 				n := completed.Add(1)
-				if bar != nil {
-					bar.Add(1)
-				}
 				if s.Verbose && n%500 == 0 {
 					elapsed := time.Since(start).Seconds()
 					fmt.Printf("  [%d/%d] %.0f targets/sec\n", n, len(targets), float64(n)/elapsed)
@@ -114,8 +132,11 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	close(jobs)
 	wg.Wait()
 
-	if bar != nil {
-		bar.Finish()
+	close(scanDone)
+	if mpb != nil {
+		time.Sleep(300 * time.Millisecond)
+		mpb.Close()
+		color.Show()
 		fmt.Println()
 	}
 

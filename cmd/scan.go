@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -136,15 +138,22 @@ func runScan(cmd *cobra.Command, args []string) error {
 	sc.Run(ctx, targets)
 	elapsed := time.Since(start)
 
-	// Filter by max latency and success.
+	// Filter: keep results where any probe succeeded and latency is within limit.
 	var clean []scanner.ProbeResult
 	for _, r := range sc.Results {
-		if r.TCPSuccess && r.Latency <= cfg.MaxLatency {
+		anyOK := r.TCPSuccess || r.TLSSuccess || r.HTTPSuccess || r.HTTP2Success
+		if anyOK && r.Latency <= cfg.MaxLatency {
 			clean = append(clean, r)
 		}
 	}
 
-	if err := output.Write(clean, cfg.Output, cfg.OutputFmt, elapsed); err != nil {
+	// Append timestamp to output filename: result.txt → result-20260413-151200.txt
+	ext := filepath.Ext(cfg.Output)
+	base := strings.TrimSuffix(cfg.Output, ext)
+	ts := time.Now().Format("20060102-150405")
+	outPath := base + "-" + ts + ext
+
+	if err := output.Write(clean, outPath, cfg.OutputFmt, elapsed); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
 	return nil
