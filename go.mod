@@ -3,8 +3,7 @@ module cf-knife
 go 1.25.0
 
 require (
-	github.com/hedzr/is v0.9.0
-	github.com/hedzr/progressbar/v2 v2.1.1
+	github.com/elulcao/progress-bar v0.1.6
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/net v0.53.0
@@ -23,6 +22,5 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/term v0.42.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 )

@@ -7,8 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hedzr/is/term/color"
-	"github.com/hedzr/progressbar/v2"
+	pbar "github.com/elulcao/progress-bar/cmd"
 )
 
 // Scanner coordinates the concurrent probing of targets.
@@ -22,6 +21,8 @@ type Scanner struct {
 
 	Results []ProbeResult
 }
+
+const pbarScale = 10000
 
 // Run dispatches all targets across a bounded worker pool with optional
 // global and per-worker rate limiting. It blocks until every target has
@@ -43,37 +44,30 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	total := int64(len(targets))
 	scanDone := make(chan struct{})
 
-	// Progress bar (hedzr/progressbar).
-	var mpb progressbar.MultiPB
+	// Progress bar (elulcao/progress-bar).
+	var pb *pbar.PBar
 	if s.Progress {
-		color.Hide()
-		mpb = progressbar.New()
-		mpb.Add(total, "scanning",
-			progressbar.WithBarStepper(0),
-			progressbar.WithBarWorker(func(bar progressbar.MiniResizeableBar, exitCh <-chan struct{}) bool {
-				ticker := time.NewTicker(200 * time.Millisecond)
-				defer ticker.Stop()
-				var lastN int64
-				for {
-					select {
-					case <-ticker.C:
-						n := completed.Load()
-						if delta := n - lastN; delta > 0 {
-							bar.Step(delta)
-							lastN = n
-						}
-					case <-scanDone:
-						n := completed.Load()
-						if delta := n - lastN; delta > 0 {
-							bar.Step(delta)
-						}
-						return false
-					case <-exitCh:
-						return true
-					}
+		pb = pbar.NewPBar()
+		pb.Total = pbarScale
+		pb.DoneStr = "█"
+		pb.OngoingStr = "░"
+		pb.SignalHandler()
+
+		go func() {
+			ticker := time.NewTicker(150 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					n := completed.Load()
+					scaled := int(n * pbarScale / total)
+					pb.RenderPBar(scaled)
+				case <-scanDone:
+					pb.RenderPBar(pbarScale)
+					return
 				}
-			}),
-		)
+			}
+		}()
 	}
 
 	start := time.Now()
@@ -84,7 +78,6 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 		go func() {
 			defer wg.Done()
 
-			// Per-worker rate limiter.
 			var workerTick <-chan time.Time
 			var workerTicker *time.Ticker
 			if s.RateLimit > 0 {
@@ -115,7 +108,6 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 		}()
 	}
 
-	// Dispatch with optional global rate limit.
 	for i := range targets {
 		if ctx.Err() != nil {
 			break
@@ -133,10 +125,9 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	wg.Wait()
 
 	close(scanDone)
-	if mpb != nil {
-		time.Sleep(300 * time.Millisecond)
-		mpb.Close()
-		color.Show()
+	if pb != nil {
+		time.Sleep(200 * time.Millisecond)
+		pb.CleanUp()
 		fmt.Println()
 	}
 
