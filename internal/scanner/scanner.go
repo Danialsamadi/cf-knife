@@ -41,27 +41,40 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	}
 
 	var completed atomic.Int64
+	var tcpOK, tlsOK, httpOK, h2OK, errCount atomic.Int64
 	total := int64(len(targets))
 	scanDone := make(chan struct{})
+	start := time.Now()
 
-	// Progress bar (elulcao/progress-bar).
+	// Progress bar + live stats (elulcao/progress-bar).
 	var pb *pbar.PBar
 	if s.Progress {
 		pb = pbar.NewPBar()
 		pb.Total = pbarScale
 		pb.DoneStr = "█"
 		pb.OngoingStr = "░"
-		pb.SignalHandler()
 
 		go func() {
-			ticker := time.NewTicker(150 * time.Millisecond)
-			defer ticker.Stop()
+			barTicker := time.NewTicker(150 * time.Millisecond)
+			statsTicker := time.NewTicker(3 * time.Second)
+			defer barTicker.Stop()
+			defer statsTicker.Stop()
 			for {
 				select {
-				case <-ticker.C:
+				case <-barTicker.C:
 					n := completed.Load()
 					scaled := int(n * pbarScale / total)
 					pb.RenderPBar(scaled)
+				case <-statsTicker.C:
+					n := completed.Load()
+					secs := time.Since(start).Seconds()
+					rate := float64(n) / secs
+					pb.Println(fmt.Sprintf(
+						"  \033[36m%d/%d\033[0m scanned | \033[32mTCP:%d TLS:%d HTTP:%d H2:%d\033[0m | \033[31merr:%d\033[0m | %.0f/s",
+						n, total,
+						tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(),
+						errCount.Load(), rate,
+					))
 				case <-scanDone:
 					pb.RenderPBar(pbarScale)
 					return
@@ -69,8 +82,6 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 			}
 		}()
 	}
-
-	start := time.Now()
 
 	var wg sync.WaitGroup
 	for w := 0; w < s.Threads; w++ {
@@ -98,7 +109,23 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 					}
 				}
 
-				results[idx] = Probe(ctx, targets[idx], s.Config)
+				res := Probe(ctx, targets[idx], s.Config)
+				results[idx] = res
+				if res.TCPSuccess {
+					tcpOK.Add(1)
+				}
+				if res.TLSSuccess {
+					tlsOK.Add(1)
+				}
+				if res.HTTPSuccess {
+					httpOK.Add(1)
+				}
+				if res.HTTP2Success {
+					h2OK.Add(1)
+				}
+				if res.Error != "" {
+					errCount.Add(1)
+				}
 				n := completed.Add(1)
 				if s.Verbose && n%500 == 0 {
 					elapsed := time.Since(start).Seconds()
@@ -119,7 +146,11 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 				break
 			}
 		}
-		jobs <- i
+		select {
+		case jobs <- i:
+		case <-ctx.Done():
+			break
+		}
 	}
 	close(jobs)
 	wg.Wait()
@@ -130,6 +161,11 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 		pb.CleanUp()
 		fmt.Println()
 	}
+
+	elapsed := time.Since(start)
+	fmt.Printf("\n  Scan complete in %s — %d targets scanned\n", elapsed.Round(time.Millisecond), total)
+	fmt.Printf("  TCP: %d  TLS: %d  HTTP: %d  H2: %d  Errors: %d\n\n",
+		tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(), errCount.Load())
 
 	s.Results = results
 }

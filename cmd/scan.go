@@ -138,6 +138,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 	sc.Run(ctx, targets)
 	elapsed := time.Since(start)
 
+	interrupted := ctx.Err() != nil
+
+	// From here on, ignore further signals so the save phase always completes.
+	stop()
+	signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+	if interrupted {
+		fmt.Println("\n  Interrupted — saving partial results...")
+	}
+
 	// Filter: keep results where any probe succeeded and latency is within limit.
 	var clean []scanner.ProbeResult
 	for _, r := range sc.Results {
@@ -156,6 +165,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err := output.Write(clean, outPath, cfg.OutputFmt, elapsed); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
+
+	fmt.Printf("  %d clean results saved to %s\n", len(clean), outPath)
 	return nil
 }
 
