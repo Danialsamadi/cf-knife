@@ -26,6 +26,7 @@ type ProbeConfig struct {
 	HTTPURL    string
 	MaxLatency time.Duration
 	ScanType   ScanType
+	Script     string
 }
 
 // ShouldTCP returns true if TCP probing is enabled by mode or explicit flag.
@@ -126,6 +127,11 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	// Close any lingering TLS conn.
 	if tlsConn != nil {
 		tlsConn.Close()
+	}
+
+	// Script probes run after standard probes succeed.
+	if pc.Script == "cloudflare" && res.TCPSuccess {
+		RunCloudflareScript(ctx, &res, pc.SNI, pc.Timeout)
 	}
 
 	res.Latency = time.Since(start)

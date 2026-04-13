@@ -119,6 +119,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		HTTPURL:    cfg.HTTPURL,
 		MaxLatency: cfg.MaxLatency,
 		ScanType:   scanner.ScanType(cfg.ScanType),
+		Script:     cfg.Script,
 	}
 
 	sc := &scanner.Scanner{
