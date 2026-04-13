@@ -75,6 +75,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Apply timing preset for flags the user didn't explicitly set.
+	cfg.ApplyTiming(func(name string) bool {
+		return cmd.Flags().Changed(name)
+	})
+
 	if cfg.SaveConfig {
 		savePath := "cf-knife-config.json"
 		if cfg.ConfigFile != "" {
@@ -117,8 +122,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	sc := &scanner.Scanner{
-		Threads: cfg.Threads,
-		Config:  pc,
+		Threads:   cfg.Threads,
+		Config:    pc,
+		Rate:      cfg.Rate,
+		RateLimit: cfg.RateLimit,
+		Progress:  cfg.Progress,
+		Verbose:   cfg.Verbose,
 	}
 
 	fmt.Println("scanning...")
