@@ -83,6 +83,12 @@ func writeTXT(results []scanner.ProbeResult, path string) error {
 		if r.SNIFront != "" {
 			line += fmt.Sprintf(" | sni_front=%s", r.SNIFront)
 		}
+		if r.CertIssuer != "" {
+			line += fmt.Sprintf(" | cert_issuer=%s", r.CertIssuer)
+		}
+		if r.CertMITM {
+			line += " | MITM_DETECTED"
+		}
 		fmt.Fprintln(f, line)
 	}
 	return nil
@@ -109,7 +115,9 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 	header := []string{"ip", "port", "latency_ms", "source_range", "tcp", "tls", "http", "http2",
 		"scan_type", "server", "tls_version", "tls_cipher", "alpn", "cf_ray", "service",
 		"ping_ms", "jitter_ms", "download_mbps", "upload_mbps",
-		"best_fragment", "sni_front", "error"}
+		"best_fragment", "sni_front",
+		"cert_issuer", "cert_subject", "cert_expiry", "cert_mitm",
+		"error"}
 	if err := w.Write(header); err != nil {
 		return err
 	}
@@ -126,6 +134,7 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 			fmtFloat(r.PingMs), fmtFloat(r.JitterMs),
 			fmtFloat(r.DownloadMbps), fmtFloat(r.UploadMbps),
 			fmtInt(r.BestFragmentSize), r.SNIFront,
+			r.CertIssuer, r.CertSubject, r.CertExpiry, boolStr(r.CertMITM),
 			r.Error,
 		}
 		if err := w.Write(row); err != nil {

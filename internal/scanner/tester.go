@@ -31,6 +31,7 @@ type ProbeConfig struct {
 	SpeedTest     bool
 	DPIAnalysis   bool
 	FragmentSizes []int
+	CertCheck     bool
 }
 
 // ShouldTCP returns true if TCP probing is enabled by mode or explicit flag.
@@ -125,6 +126,14 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		if st.NegotiatedProtocol != "" {
 			res.ALPN = st.NegotiatedProtocol
 		}
+
+		if pc.CertCheck {
+			ci := ValidateCert(st, pc.Script)
+			res.CertIssuer = ci.Issuer
+			res.CertSubject = ci.Subject
+			res.CertExpiry = ci.Expiry
+			res.CertMITM = ci.MITM
+		}
 	}
 
 	// HTTP/1.1
@@ -171,8 +180,11 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	}
 
 	// Script probes run after standard probes succeed.
-	if pc.Script == "cloudflare" && res.TCPSuccess {
+	switch {
+	case pc.Script == "cloudflare" && res.TCPSuccess:
 		RunCloudflareScript(ctx, &res, pc.SNI, pc.Timeout)
+	case pc.Script == "fastly" && res.TCPSuccess:
+		RunFastlyScript(ctx, &res, pc.SNI, pc.Timeout)
 	}
 
 	return res

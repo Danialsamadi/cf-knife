@@ -46,6 +46,12 @@ type Config struct {
 	FragmentSizes string `json:"fragment_sizes" mapstructure:"fragment-sizes"`
 	WARPScan      bool   `json:"warp" mapstructure:"warp"`
 	WARPPort      int    `json:"warp_port" mapstructure:"warp-port"`
+
+	FastlyRanges bool   `json:"fastly_ranges" mapstructure:"fastly-ranges"`
+	CertCheck    bool   `json:"cert_check" mapstructure:"cert-check"`
+	SmartRetry   bool   `json:"smart_retry" mapstructure:"smart-retry"`
+	Resume       bool   `json:"resume" mapstructure:"resume"`
+	DBPath       string `json:"db_path" mapstructure:"db"`
 }
 
 // Load reads a Config from Viper, which should already have flag bindings and
@@ -93,6 +99,12 @@ func Load(v *viper.Viper) (*Config, error) {
 		FragmentSizes: v.GetString("fragment-sizes"),
 		WARPScan:      v.GetBool("warp"),
 		WARPPort:      v.GetInt("warp-port"),
+
+		FastlyRanges: v.GetBool("fastly-ranges"),
+		CertCheck:    v.GetBool("cert-check"),
+		SmartRetry:   v.GetBool("smart-retry"),
+		Resume:       v.GetBool("resume"),
+		DBPath:       v.GetString("db"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -129,8 +141,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("--ipv4-only and --ipv6-only are mutually exclusive")
 	}
 
-	if c.Script != "" && c.Script != "cloudflare" {
-		return fmt.Errorf("--script must be 'cloudflare' or empty, got %q", c.Script)
+	validScripts := map[string]bool{"": true, "cloudflare": true, "fastly": true}
+	if !validScripts[c.Script] {
+		return fmt.Errorf("--script must be 'cloudflare', 'fastly', or empty, got %q", c.Script)
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 
 	"cf-knife/internal/config"
 	"cf-knife/internal/output"
+	"cf-knife/internal/queue"
 	"cf-knife/internal/scanner"
 
 	"github.com/spf13/cobra"
@@ -50,7 +52,7 @@ func init() {
 	f.String("scan-type", "connect", "scan engine: connect|fast|syn")
 	f.Int("rate", 0, "global packets/connections per second (0=unlimited)")
 	f.Int("timing", 3, "nmap-style timing template 0-5")
-	f.String("script", "", "run a script: cloudflare")
+	f.String("script", "", "run a script: cloudflare|fastly")
 	f.Bool("shuffle", false, "randomize target order")
 	f.Int("rate-limit", 0, "per-worker requests/sec (legacy compat)")
 	f.String("config", "", "path to JSON config file")
@@ -63,6 +65,12 @@ func init() {
 	f.String("fragment-sizes", "10,50,100,200,500", "comma-separated fragment sizes for DPI testing")
 	f.Bool("warp", false, "scan for reachable Cloudflare WARP UDP endpoints")
 	f.Int("warp-port", 2408, "UDP port for WARP probing")
+
+	f.Bool("fastly-ranges", false, "use Fastly edge IP ranges instead of Cloudflare")
+	f.Bool("cert-check", false, "validate TLS certificates and detect MITM")
+	f.Bool("smart-retry", false, "auto-relax thresholds if strict settings find nothing")
+	f.Bool("resume", false, "resume the last interrupted scan from SQLite queue")
+	f.String("db", "cf-knife.db", "path to SQLite database for persistent queue")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -108,7 +116,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Println("loading targets...")
 	}
 	targets, err := scanner.LoadTargets(ctx, cfg.IPs, cfg.InputFile, cfg.Ports,
-		cfg.IPv4Only, cfg.IPv6Only, cfg.Shuffle)
+		cfg.IPv4Only, cfg.IPv6Only, cfg.Shuffle, cfg.FastlyRanges)
 	if err != nil {
 		return err
 	}
@@ -141,6 +149,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		SpeedTest:     cfg.SpeedTest,
 		DPIAnalysis:   cfg.DPIAnalysis,
 		FragmentSizes: fragSizes,
+		CertCheck:     cfg.CertCheck,
 	}
 
 	sc := &scanner.Scanner{
@@ -185,12 +194,59 @@ func runScan(cmd *cobra.Command, args []string) error {
 			len(reachable), warpPath, warpElapsed.Seconds())
 	}
 
+	// Persistent SQLite queue: open DB, handle --resume or new scan.
+	var queueDB *queue.DB
+	var scanID int64
+	if cfg.DBPath != "" {
+		var dbErr error
+		queueDB, dbErr = queue.Open(cfg.DBPath)
+		if dbErr != nil {
+			return fmt.Errorf("open queue db: %w", dbErr)
+		}
+		defer queueDB.Close()
+
+		if cfg.Resume {
+			scanID, _ = queueDB.LatestScanID()
+			if scanID > 0 {
+				pending, pErr := queueDB.PendingTargets(scanID)
+				if pErr != nil {
+					return fmt.Errorf("load pending targets: %w", pErr)
+				}
+				if len(pending) > 0 {
+					fmt.Printf("  resuming scan #%d: %d pending targets\n", scanID, len(pending))
+					targets = pending
+				} else {
+					fmt.Printf("  scan #%d already complete, starting fresh\n", scanID)
+					cfg.Resume = false
+				}
+			} else {
+				cfg.Resume = false
+			}
+		}
+
+		if !cfg.Resume {
+			cfgJSON, _ := json.Marshal(cfg)
+			scanID, _ = queueDB.InitScan(targets, string(cfgJSON))
+			fmt.Printf("  new scan #%d created in %s\n", scanID, cfg.DBPath)
+		}
+
+		capturedDB := queueDB
+		capturedScanID := scanID
+		sc.OnResult = func(_ int, r scanner.ProbeResult) {
+			_ = capturedDB.MarkDone(capturedScanID, r)
+		}
+	}
+
 	fmt.Println("scanning...")
 	start := time.Now()
 	sc.Run(ctx, targets)
 	elapsed := time.Since(start)
 
 	interrupted := ctx.Err() != nil
+
+	if queueDB != nil && !interrupted {
+		_ = queueDB.CompleteScan(scanID)
+	}
 
 	// From here on, ignore further signals so the save phase always completes.
 	stop()
@@ -200,11 +256,25 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	// Filter: keep results where any probe succeeded and latency is within limit.
-	var clean []scanner.ProbeResult
-	for _, r := range sc.Results {
-		anyOK := r.TCPSuccess || r.TLSSuccess || r.HTTPSuccess || r.HTTP2Success
-		if anyOK && r.Latency <= cfg.MaxLatency {
-			clean = append(clean, r)
+	clean, retryable := filterResults(sc.Results, cfg.MaxLatency)
+
+	// Smart retry: if nothing passed filters but some targets were alive,
+	// relax thresholds and re-scan only the alive-but-slow targets.
+	if cfg.SmartRetry && len(clean) == 0 && len(retryable) > 0 && !interrupted {
+		const maxRetryRounds = 2
+		for round := 1; round <= maxRetryRounds && len(clean) == 0 && len(retryable) > 0; round++ {
+			oldLat := cfg.MaxLatency
+			cfg.MaxLatency = cfg.MaxLatency * 2
+			pc.MaxLatency = cfg.MaxLatency
+			pc.Timeout = time.Duration(float64(pc.Timeout) * 1.5)
+
+			fmt.Printf("  0 results passed filters; retrying with relaxed thresholds (max-latency: %s -> %s, round %d/%d)\n",
+				oldLat, cfg.MaxLatency, round, maxRetryRounds)
+			fmt.Printf("  re-scanning %d alive targets...\n", len(retryable))
+
+			sc.Results = nil
+			sc.Run(ctx, retryable)
+			clean, retryable = filterResults(sc.Results, cfg.MaxLatency)
 		}
 	}
 
@@ -227,4 +297,23 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// filterResults splits probe results into "clean" (passed all filters) and
+// "retryable" (TCP-alive but filtered out by latency). Retryable targets can
+// be re-scanned with relaxed thresholds by the smart-retry logic.
+func filterResults(results []scanner.ProbeResult, maxLatency time.Duration) (clean []scanner.ProbeResult, retryable []scanner.Target) {
+	for _, r := range results {
+		anyOK := r.TCPSuccess || r.TLSSuccess || r.HTTPSuccess || r.HTTP2Success
+		if anyOK && r.Latency <= maxLatency {
+			clean = append(clean, r)
+		} else if anyOK && r.Latency > maxLatency {
+			retryable = append(retryable, scanner.Target{
+				IP:          r.IP,
+				Port:        r.Port,
+				SourceRange: r.SourceRange,
+			})
+		}
+	}
+	return
 }

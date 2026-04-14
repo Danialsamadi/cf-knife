@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
@@ -20,9 +21,11 @@ const (
 	cfIPv6URL = "https://www.cloudflare.com/ips-v6/"
 )
 
+const fastlyIPListURL = "https://api.fastly.com/public-ip-list"
+
 // LoadTargets resolves all three input modes into a flat slice of Targets.
-// Priority: --ips > --input-file > official Cloudflare ranges.
-func LoadTargets(ctx context.Context, ips, inputFile string, ports []string, ipv4Only, ipv6Only, shuffle bool) ([]Target, error) {
+// Priority: --ips > --input-file > official ranges (Cloudflare or Fastly).
+func LoadTargets(ctx context.Context, ips, inputFile string, ports []string, ipv4Only, ipv6Only, shuffle, fastlyRanges bool) ([]Target, error) {
 	var cidrs []string
 
 	switch {
@@ -39,6 +42,12 @@ func LoadTargets(ctx context.Context, ips, inputFile string, ports []string, ipv
 			return nil, fmt.Errorf("read input file: %w", err)
 		}
 		cidrs = lines
+	case fastlyRanges:
+		fetched, err := fetchFastlyRanges(ctx, ipv4Only, ipv6Only)
+		if err != nil {
+			return nil, fmt.Errorf("fetch fastly ranges: %w", err)
+		}
+		cidrs = fetched
 	default:
 		fetched, err := fetchCloudflareRanges(ctx, ipv4Only, ipv6Only)
 		if err != nil {
@@ -92,6 +101,39 @@ func fetchCloudflareRanges(ctx context.Context, ipv4Only, ipv6Only bool) ([]stri
 
 	if len(all) == 0 {
 		return nil, fmt.Errorf("no CIDR ranges found from Cloudflare")
+	}
+	return all, nil
+}
+
+func fetchFastlyRanges(ctx context.Context, ipv4Only, ipv6Only bool) ([]string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fastlyIPListURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", fastlyIPListURL, err)
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		Addresses     []string `json:"addresses"`
+		IPv6Addresses []string `json:"ipv6_addresses"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode fastly ip list: %w", err)
+	}
+
+	var all []string
+	if !ipv6Only {
+		all = append(all, payload.Addresses...)
+	}
+	if !ipv4Only {
+		all = append(all, payload.IPv6Addresses...)
+	}
+	if len(all) == 0 {
+		return nil, fmt.Errorf("no CIDR ranges found from Fastly")
 	}
 	return all, nil
 }

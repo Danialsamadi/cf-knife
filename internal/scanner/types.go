@@ -41,6 +41,12 @@ type ProbeResult struct {
 	BestFragmentSize int    `json:"best_fragment_size,omitempty"`
 	SNIFront         string `json:"sni_front,omitempty"`
 
+	// TLS certificate validation (--cert-check).
+	CertIssuer  string `json:"cert_issuer,omitempty"`
+	CertSubject string `json:"cert_subject,omitempty"`
+	CertExpiry  string `json:"cert_expiry,omitempty"`
+	CertMITM    bool   `json:"cert_mitm,omitempty"`
+
 	Error string `json:"error,omitempty"`
 }
 
@@ -85,6 +91,10 @@ type Scanner struct {
 	RateLimit int // per-worker ops/sec; 0 = unlimited
 	Progress  bool
 	Verbose   bool
+
+	// OnResult is called after each probe completes, with the target index
+	// and result. Used by the persistent queue to async-write results to DB.
+	OnResult func(idx int, r ProbeResult)
 
 	Results []ProbeResult
 }

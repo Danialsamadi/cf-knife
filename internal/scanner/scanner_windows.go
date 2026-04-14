@@ -82,6 +82,9 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 
 				res := Probe(ctx, targets[idx], s.Config)
 				results[idx] = res
+				if s.OnResult != nil {
+					s.OnResult(idx, res)
+				}
 				if res.TCPSuccess {
 					tcpOK.Add(1)
 				}

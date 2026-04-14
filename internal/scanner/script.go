@@ -58,6 +58,46 @@ func parseCDNCGITrace(r *ProbeResult, body string) {
 	}
 }
 
+// RunFastlyScript performs Fastly-specific probes on an already successful
+// target and enriches the ProbeResult in place.
+func RunFastlyScript(ctx context.Context, r *ProbeResult, sni string, timeout time.Duration) {
+	addr := net.JoinHostPort(r.IP, r.Port)
+
+	probeURL := fmt.Sprintf("https://%s/", sni)
+	_, hdrs, err := fetchBody(ctx, addr, sni, timeout, probeURL)
+	if err != nil {
+		return
+	}
+
+	if sv := hdrs.Get("Server"); sv != "" && r.ServerHeader == "" {
+		r.ServerHeader = sv
+	}
+
+	pop := ""
+	if servedBy := hdrs.Get("X-Served-By"); servedBy != "" {
+		parts := strings.Split(servedBy, "-")
+		if len(parts) >= 2 {
+			pop = parts[len(parts)-1]
+		} else {
+			pop = servedBy
+		}
+	}
+
+	via := hdrs.Get("Via")
+	xCache := hdrs.Get("X-Cache")
+	isFastly := strings.Contains(strings.ToLower(via), "varnish") ||
+		strings.Contains(strings.ToLower(r.ServerHeader), "fastly") ||
+		xCache != ""
+
+	if isFastly {
+		if pop != "" {
+			r.ServiceName = "fastly/" + pop
+		} else {
+			r.ServiceName = "fastly"
+		}
+	}
+}
+
 func fetchBody(ctx context.Context, addr, sni string, timeout time.Duration, url string) (string, http.Header, error) {
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
