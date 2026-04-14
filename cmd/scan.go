@@ -3,10 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"cf-knife/internal/config"
@@ -100,7 +100,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	// Load targets.
@@ -194,7 +194,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// From here on, ignore further signals so the save phase always completes.
 	stop()
-	signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+	signal.Reset(os.Interrupt)
 	if interrupted {
 		fmt.Println("\n  Interrupted — saving partial results...")
 	}

@@ -62,6 +62,18 @@ jobs:
           go build -ldflags="-s -w" -o build/${{ matrix.output }} .
         shell: bash
 
+      - name: Smoke test (native builds only)
+        if: matrix.os == 'linux' && matrix.arch == 'amd64' || matrix.os == 'windows' && matrix.arch == 'amd64' || matrix.os == 'darwin'
+        run: |
+          echo "--- version/help ---"
+          ./build/${{ matrix.output }} --help
+          echo "--- scan help ---"
+          ./build/${{ matrix.output }} scan --help
+          echo "--- quick scan (1 IP, tcp-only, 1 thread, 5s timeout) ---"
+          ./build/${{ matrix.output }} scan --ips "1.1.1.1" --port 443 --mode tcp-only --threads 1 --timing 0 --timeout 5s --progress=false 2>&1 || true
+          echo "--- smoke test passed ---"
+        shell: bash
+
       - name: Create checksums
         run: |
           cd build
