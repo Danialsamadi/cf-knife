@@ -31,7 +31,30 @@ type ProbeResult struct {
 	CFRay        string `json:"cf_ray,omitempty"`
 	ServiceName  string `json:"service_name,omitempty"`
 
+	// Performance metrics (--speed-test).
+	PingMs       float64 `json:"ping_ms,omitempty"`
+	JitterMs     float64 `json:"jitter_ms,omitempty"`
+	DownloadMbps float64 `json:"download_mbps,omitempty"`
+	UploadMbps   float64 `json:"upload_mbps,omitempty"`
+
+	// DPI analysis (--dpi).
+	BestFragmentSize int    `json:"best_fragment_size,omitempty"`
+	SNIFront         string `json:"sni_front,omitempty"`
+
 	Error string `json:"error,omitempty"`
+}
+
+// WARPTarget represents a single WARP UDP endpoint to probe.
+type WARPTarget struct {
+	IP   string
+	Port int
+}
+
+// WARPResult holds the outcome of a WARP UDP endpoint probe.
+type WARPResult struct {
+	Endpoint  string        `json:"endpoint"`
+	RTT       time.Duration `json:"rtt_ms"`
+	Reachable bool          `json:"reachable"`
 }
 
 // ScanMode controls which probes are executed.

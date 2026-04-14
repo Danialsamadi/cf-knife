@@ -15,8 +15,8 @@ func TestTiming_Levels(t *testing.T) {
 		{1, 5, 10},
 		{2, 50, 100},
 		{3, 200, 0},
-		{4, 500, 0},
-		{5, 2000, 0},
+		{4, 2000, 0},
+		{5, 8000, 0},
 	}
 	for _, tt := range tests {
 		p := Timing(tt.level)
@@ -35,8 +35,8 @@ func TestApplyTiming_NoOverride(t *testing.T) {
 		Threads: 200, // will be overridden since flag not "changed"
 	}
 	c.ApplyTiming(func(string) bool { return false })
-	if c.Threads != 2000 {
-		t.Errorf("Threads = %d, want 2000", c.Threads)
+	if c.Threads != 8000 {
+		t.Errorf("Threads = %d, want 8000", c.Threads)
 	}
 	if c.Timeout != 1*time.Second {
 		t.Errorf("Timeout = %v, want 1s", c.Timeout)

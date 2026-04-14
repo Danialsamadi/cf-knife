@@ -63,7 +63,7 @@ func writeTXT(results []scanner.ProbeResult, path string) error {
 	}
 	defer f.Close()
 	for _, r := range results {
-		fmt.Fprintf(f, "%s:%s | latency=%dms | range=%s | tcp=%s tls=%s http=%s http2=%s | service=%s\n",
+		line := fmt.Sprintf("%s:%s | latency=%dms | range=%s | tcp=%s tls=%s http=%s http2=%s | service=%s",
 			r.IP, r.Port,
 			r.Latency.Milliseconds(),
 			r.SourceRange,
@@ -71,6 +71,19 @@ func writeTXT(results []scanner.ProbeResult, path string) error {
 			boolOK(r.HTTPSuccess), boolOK(r.HTTP2Success),
 			nvl(r.ServiceName, "-"),
 		)
+		if r.PingMs > 0 {
+			line += fmt.Sprintf(" | ping=%.1fms jitter=%.1fms", r.PingMs, r.JitterMs)
+		}
+		if r.DownloadMbps > 0 || r.UploadMbps > 0 {
+			line += fmt.Sprintf(" | dl=%.2fMbps ul=%.2fMbps", r.DownloadMbps, r.UploadMbps)
+		}
+		if r.BestFragmentSize > 0 {
+			line += fmt.Sprintf(" | frag=%d", r.BestFragmentSize)
+		}
+		if r.SNIFront != "" {
+			line += fmt.Sprintf(" | sni_front=%s", r.SNIFront)
+		}
+		fmt.Fprintln(f, line)
 	}
 	return nil
 }
@@ -94,7 +107,9 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 	defer w.Flush()
 
 	header := []string{"ip", "port", "latency_ms", "source_range", "tcp", "tls", "http", "http2",
-		"scan_type", "server", "tls_version", "tls_cipher", "alpn", "cf_ray", "service", "error"}
+		"scan_type", "server", "tls_version", "tls_cipher", "alpn", "cf_ray", "service",
+		"ping_ms", "jitter_ms", "download_mbps", "upload_mbps",
+		"best_fragment", "sni_front", "error"}
 	if err := w.Write(header); err != nil {
 		return err
 	}
@@ -107,7 +122,11 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 			boolStr(r.TCPSuccess), boolStr(r.TLSSuccess),
 			boolStr(r.HTTPSuccess), boolStr(r.HTTP2Success),
 			r.ScanType, r.ServerHeader, r.TLSVersion, r.TLSCipher,
-			r.ALPN, r.CFRay, r.ServiceName, r.Error,
+			r.ALPN, r.CFRay, r.ServiceName,
+			fmtFloat(r.PingMs), fmtFloat(r.JitterMs),
+			fmtFloat(r.DownloadMbps), fmtFloat(r.UploadMbps),
+			fmtInt(r.BestFragmentSize), r.SNIFront,
+			r.Error,
 		}
 		if err := w.Write(row); err != nil {
 			return err
@@ -211,4 +230,67 @@ func maxF(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+func fmtFloat(v float64) string {
+	if v == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", v)
+}
+
+func fmtInt(v int) string {
+	if v == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", v)
+}
+
+// WriteWARP saves reachable WARP endpoint results to a file and prints a summary.
+func WriteWARP(results []scanner.WARPResult, path string, elapsed time.Duration) error {
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].RTT < results[j].RTT
+	})
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for _, r := range results {
+		fmt.Fprintf(f, "%s | rtt=%dms\n", r.Endpoint, r.RTT.Milliseconds())
+	}
+
+	printWARPSummary(results, path, elapsed)
+	return nil
+}
+
+func printWARPSummary(results []scanner.WARPResult, path string, elapsed time.Duration) {
+	const (
+		reset = "\033[0m"
+		bold  = "\033[1m"
+		cyan  = "\033[36m"
+		green = "\033[32m"
+	)
+
+	fmt.Printf("\n%s%s=== WARP scan results ===%s\n\n", bold, cyan, reset)
+	fmt.Printf("%s%-30s %10s%s\n", bold, "ENDPOINT", "RTT", reset)
+	fmt.Println(strings.Repeat("-", 45))
+
+	limit := len(results)
+	if limit > 30 {
+		limit = 30
+	}
+	for _, r := range results[:limit] {
+		fmt.Printf("%s%-30s%s %8dms\n", green, r.Endpoint, reset, r.RTT.Milliseconds())
+	}
+	if len(results) > 30 {
+		fmt.Printf("  ... and %d more\n", len(results)-30)
+	}
+
+	fmt.Println(strings.Repeat("-", 45))
+	fmt.Printf("\n%sStats:%s  %d reachable endpoints  |  elapsed %s\n",
+		bold, reset, len(results), elapsed.Round(time.Millisecond))
+	fmt.Printf("%sFile:%s  %s\n\n", bold, reset, path)
 }

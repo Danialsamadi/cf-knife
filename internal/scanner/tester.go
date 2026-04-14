@@ -27,6 +27,10 @@ type ProbeConfig struct {
 	MaxLatency time.Duration
 	ScanType   ScanType
 	Script     string
+
+	SpeedTest     bool
+	DPIAnalysis   bool
+	FragmentSizes []int
 }
 
 // ShouldTCP returns true if TCP probing is enabled by mode or explicit flag.
@@ -152,6 +156,18 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	// Close any lingering TLS conn.
 	if tlsConn != nil {
 		tlsConn.Close()
+	}
+
+	// Performance metrics: ICMP ping/jitter and HTTP speed.
+	if pc.SpeedTest && res.TCPSuccess {
+		res.PingMs, res.JitterMs, _ = ProbePing(ctx, t.IP, 5, pc.Timeout)
+		res.DownloadMbps, res.UploadMbps, _ = ProbeSpeed(ctx, addr, pc.SNI, pc.Timeout)
+	}
+
+	// DPI fragment enumeration and SNI fronting.
+	if pc.DPIAnalysis && res.TCPSuccess && isTLSPort {
+		res.BestFragmentSize, _ = ProbeDPI(ctx, addr, pc.SNI, pc.Timeout, pc.FragmentSizes)
+		res.SNIFront, _ = ProbeSNIFronting(ctx, addr, DefaultSNIList, pc.Timeout)
 	}
 
 	// Script probes run after standard probes succeed.

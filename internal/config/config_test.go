@@ -26,9 +26,9 @@ func TestConfig_Validate(t *testing.T) {
 	}{
 		{"valid defaults", func(c *Config) {}, false},
 		{"threads min boundary", func(c *Config) { c.Threads = 1 }, false},
-		{"threads max boundary", func(c *Config) { c.Threads = 2000 }, false},
+		{"threads max boundary", func(c *Config) { c.Threads = 10000 }, false},
 		{"threads too low", func(c *Config) { c.Threads = 0 }, true},
-		{"threads too high", func(c *Config) { c.Threads = 3000 }, true},
+		{"threads too high", func(c *Config) { c.Threads = 10001 }, true},
 		{"timing min boundary", func(c *Config) { c.Timing = 0 }, false},
 		{"timing max boundary", func(c *Config) { c.Timing = 5 }, false},
 		{"timing too high", func(c *Config) { c.Timing = 6 }, true},

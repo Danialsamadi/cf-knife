@@ -40,6 +40,12 @@ type Config struct {
 	SaveConfig bool          `json:"-" mapstructure:"save-config"`
 	Verbose    bool          `json:"verbose" mapstructure:"verbose"`
 	Progress   bool          `json:"progress" mapstructure:"progress"`
+
+	SpeedTest     bool   `json:"speed_test" mapstructure:"speed-test"`
+	DPIAnalysis   bool   `json:"dpi" mapstructure:"dpi"`
+	FragmentSizes string `json:"fragment_sizes" mapstructure:"fragment-sizes"`
+	WARPScan      bool   `json:"warp" mapstructure:"warp"`
+	WARPPort      int    `json:"warp_port" mapstructure:"warp-port"`
 }
 
 // Load reads a Config from Viper, which should already have flag bindings and
@@ -81,6 +87,12 @@ func Load(v *viper.Viper) (*Config, error) {
 		SaveConfig: v.GetBool("save-config"),
 		Verbose:    v.GetBool("verbose"),
 		Progress:   v.GetBool("progress"),
+
+		SpeedTest:     v.GetBool("speed-test"),
+		DPIAnalysis:   v.GetBool("dpi"),
+		FragmentSizes: v.GetString("fragment-sizes"),
+		WARPScan:      v.GetBool("warp"),
+		WARPPort:      v.GetInt("warp-port"),
 	}
 
 	if err := cfg.Validate(); err != nil {

@@ -57,6 +57,12 @@ func init() {
 	f.Bool("save-config", false, "save current flags to config file")
 	f.Bool("verbose", false, "verbose logging")
 	f.Bool("progress", true, "show progress bar")
+
+	f.Bool("speed-test", false, "enable ICMP ping, jitter, and HTTP speed measurement")
+	f.Bool("dpi", false, "enumerate DPI fragment sizes and find best SNI front")
+	f.String("fragment-sizes", "10,50,100,200,500", "comma-separated fragment sizes for DPI testing")
+	f.Bool("warp", false, "scan for reachable Cloudflare WARP UDP endpoints")
+	f.Int("warp-port", 2408, "UDP port for WARP probing")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -109,19 +115,32 @@ func runScan(cmd *cobra.Command, args []string) error {
 	fmt.Printf("loaded %d targets (%d IPs × %d ports)\n",
 		len(targets), len(targets)/maxInt(len(cfg.Ports), 1), len(cfg.Ports))
 
+	// Parse DPI fragment sizes if needed.
+	var fragSizes []int
+	if cfg.DPIAnalysis {
+		var parseErr error
+		fragSizes, parseErr = scanner.ParseFragmentSizes(cfg.FragmentSizes)
+		if parseErr != nil {
+			return fmt.Errorf("parse --fragment-sizes: %w", parseErr)
+		}
+	}
+
 	pc := &scanner.ProbeConfig{
-		SNI:        cfg.SNI,
-		Timeout:    cfg.Timeout,
-		Retries:    cfg.Retries,
-		Mode:       scanner.ScanMode(cfg.Mode),
-		TestTCP:    cfg.TestTCP,
-		TestTLS:    cfg.TestTLS,
-		TestHTTP:   cfg.TestHTTP,
-		TestHTTP2:  cfg.TestHTTP2,
-		HTTPURL:    cfg.HTTPURL,
-		MaxLatency: cfg.MaxLatency,
-		ScanType:   scanner.ScanType(cfg.ScanType),
-		Script:     cfg.Script,
+		SNI:           cfg.SNI,
+		Timeout:       cfg.Timeout,
+		Retries:       cfg.Retries,
+		Mode:          scanner.ScanMode(cfg.Mode),
+		TestTCP:       cfg.TestTCP,
+		TestTLS:       cfg.TestTLS,
+		TestHTTP:      cfg.TestHTTP,
+		TestHTTP2:     cfg.TestHTTP2,
+		HTTPURL:       cfg.HTTPURL,
+		MaxLatency:    cfg.MaxLatency,
+		ScanType:      scanner.ScanType(cfg.ScanType),
+		Script:        cfg.Script,
+		SpeedTest:     cfg.SpeedTest,
+		DPIAnalysis:   cfg.DPIAnalysis,
+		FragmentSizes: fragSizes,
 	}
 
 	sc := &scanner.Scanner{
@@ -131,6 +150,39 @@ func runScan(cmd *cobra.Command, args []string) error {
 		RateLimit: cfg.RateLimit,
 		Progress:  cfg.Progress,
 		Verbose:   cfg.Verbose,
+	}
+
+	// WARP scan runs as a separate path (UDP-based, not TCP probes).
+	if cfg.WARPScan {
+		fmt.Println("scanning WARP endpoints...")
+		warpStart := time.Now()
+
+		warpTargets, warpErr := scanner.ExpandWARPRanges(nil, cfg.WARPPort)
+		if warpErr != nil {
+			return fmt.Errorf("expand WARP ranges: %w", warpErr)
+		}
+		fmt.Printf("  %d WARP endpoints to probe on port %d\n", len(warpTargets), cfg.WARPPort)
+
+		warpResults := scanner.ScanWARP(ctx, warpTargets, cfg.Timeout, cfg.Threads)
+		warpElapsed := time.Since(warpStart)
+
+		var reachable []scanner.WARPResult
+		for _, wr := range warpResults {
+			if wr.Reachable {
+				reachable = append(reachable, wr)
+			}
+		}
+
+		ext := filepath.Ext(cfg.Output)
+		base := strings.TrimSuffix(cfg.Output, ext)
+		ts := time.Now().Format("20060102-150405")
+		warpPath := base + "-warp-" + ts + ext
+
+		if warpWriteErr := output.WriteWARP(reachable, warpPath, warpElapsed); warpWriteErr != nil {
+			return fmt.Errorf("write WARP output: %w", warpWriteErr)
+		}
+		fmt.Printf("  %d reachable WARP endpoints saved to %s (%.1fs)\n",
+			len(reachable), warpPath, warpElapsed.Seconds())
 	}
 
 	fmt.Println("scanning...")
