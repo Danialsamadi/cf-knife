@@ -244,22 +244,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	interrupted := ctx.Err() != nil
 
-	if queueDB != nil && !interrupted {
-		_ = queueDB.CompleteScan(scanID)
-	}
-
-	// From here on, ignore further signals so the save phase always completes.
-	stop()
-	signal.Reset(os.Interrupt)
-	if interrupted {
-		fmt.Println("\n  Interrupted — saving partial results...")
-	}
-
 	// Filter: keep results where any probe succeeded and latency is within limit.
 	clean, retryable := filterResults(sc.Results, cfg.MaxLatency)
 
 	// Smart retry: if nothing passed filters but some targets were alive,
 	// relax thresholds and re-scan only the alive-but-slow targets.
+	// Must run BEFORE stop() so ctx is still alive for the retry workers.
 	if cfg.SmartRetry && len(clean) == 0 && len(retryable) > 0 && !interrupted {
 		const maxRetryRounds = 2
 		for round := 1; round <= maxRetryRounds && len(clean) == 0 && len(retryable) > 0; round++ {
@@ -276,6 +266,17 @@ func runScan(cmd *cobra.Command, args []string) error {
 			sc.Run(ctx, retryable)
 			clean, retryable = filterResults(sc.Results, cfg.MaxLatency)
 		}
+	}
+
+	if queueDB != nil && !interrupted {
+		_ = queueDB.CompleteScan(scanID)
+	}
+
+	// From here on, ignore further signals so the save phase always completes.
+	stop()
+	signal.Reset(os.Interrupt)
+	if interrupted {
+		fmt.Println("\n  Interrupted — saving partial results...")
 	}
 
 	// Append timestamp to output filename: result.txt → result-20260413-151200.txt
