@@ -29,9 +29,9 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	var completed atomic.Int64
 	var tcpOK, tlsOK, httpOK, h2OK, errCount atomic.Int64
 	total := int64(len(targets))
+	scanDone := make(chan struct{})
 	start := time.Now()
 
-	// Windows: simplified stats output without progress bar (due to syscall issues)
 	if s.Progress {
 		go func() {
 			statsTicker := time.NewTicker(3 * time.Second)
@@ -47,6 +47,8 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 						tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(),
 						errCount.Load(), rate,
 					)
+				case <-scanDone:
+					return
 				}
 			}
 		}()
@@ -123,6 +125,7 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	}
 	close(jobs)
 	wg.Wait()
+	close(scanDone)
 
 	elapsed := time.Since(start)
 	fmt.Printf("\n  Scan complete in %s — %d targets scanned\n", elapsed.Round(time.Millisecond), total)

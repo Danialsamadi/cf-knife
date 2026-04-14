@@ -50,20 +50,27 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.25'
 
       - name: Build binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p build
-          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build \
-            -ldflags="-s -w" \
-            -o build/${{ matrix.output }} .
+          go build -ldflags="-s -w" -o build/${{ matrix.output }} .
         shell: bash
 
       - name: Create checksums
         run: |
           cd build
-          sha256sum ${{ matrix.output }} > ${{ matrix.output }}.sha256
+          if command -v sha256sum &>/dev/null; then
+            sha256sum ${{ matrix.output }} > ${{ matrix.output }}.sha256
+          else
+            certutil -hashfile ${{ matrix.output }} SHA256 | head -2 | tail -1 | tr -d ' ' > ${{ matrix.output }}.sha256
+            echo "  ${{ matrix.output }}" >> ${{ matrix.output }}.sha256
+          fi
         shell: bash
 
       - name: Upload artifact

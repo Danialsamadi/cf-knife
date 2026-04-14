@@ -36,15 +36,14 @@ func TestProbePing_DefaultCount(t *testing.T) {
 }
 
 func TestProbePing_Localhost(t *testing.T) {
-	// ICMP to localhost usually works on macOS (unprivileged UDP ICMP)
-	// but may fail in CI without root on Linux. Use short test skip.
+	// On Unix: ICMP to localhost usually works on macOS but may need root on Linux.
+	// On Windows: falls back to TCP connect which may fail on port 443 locally.
 	ping, jitter, err := ProbePing(context.Background(), "127.0.0.1", 3, 2*time.Second)
 	if err != nil {
-		if strings.Contains(err.Error(), "root") || strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "listen") {
-			t.Skipf("ICMP unavailable (needs root): %v", err)
-		}
-		if strings.Contains(err.Error(), "no ICMP replies") {
-			t.Skipf("no ICMP replies from localhost: %v", err)
+		if strings.Contains(err.Error(), "root") || strings.Contains(err.Error(), "permission") ||
+			strings.Contains(err.Error(), "listen") || strings.Contains(err.Error(), "no ICMP replies") ||
+			strings.Contains(err.Error(), "no TCP replies") || strings.Contains(err.Error(), "refused") {
+			t.Skipf("ping unavailable in this environment: %v", err)
 		}
 		t.Fatalf("ProbePing error: %v", err)
 	}
