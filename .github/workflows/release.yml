@@ -1,5 +1,6 @@
 name: Build and Release Binaries
 
+# Tagged pushes (e.g. v1.2.1) build binaries with -ldflags version=v1.2.1 and create a GitHub Release.
 on:
   push:
     tags:
@@ -57,14 +58,17 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
         run: |
           mkdir -p build
-          go build -ldflags="-s -w" -o build/${{ matrix.output }} .
+          go build -ldflags="-s -w -X cf-knife/cmd.Version=${VERSION}" -o build/${{ matrix.output }} .
         shell: bash
 
       - name: Smoke test (native builds only)
         if: matrix.os == 'linux' && matrix.arch == 'amd64' || matrix.os == 'windows' && matrix.arch == 'amd64' || matrix.os == 'darwin'
         run: |
+          echo "--- version ---"
+          ./build/${{ matrix.output }} --version
           echo "--- version/help ---"
           ./build/${{ matrix.output }} --help
           echo "--- scan help ---"

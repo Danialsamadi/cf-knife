@@ -129,21 +129,22 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 		}()
 	}
 
+dispatch:
 	for i := range targets {
 		if ctx.Err() != nil {
-			break
+			break dispatch
 		}
 		if globalTick != nil {
 			select {
 			case <-globalTick:
 			case <-ctx.Done():
-				break
+				break dispatch
 			}
 		}
 		select {
 		case jobs <- i:
 		case <-ctx.Done():
-			break
+			break dispatch
 		}
 	}
 	close(jobs)
