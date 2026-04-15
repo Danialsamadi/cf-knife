@@ -51,7 +51,11 @@ func writeCleanList(results []scanner.ProbeResult, path string) error {
 	}
 	defer f.Close()
 	for _, r := range results {
-		fmt.Fprintf(f, "%s:%s\n", r.IP, r.Port)
+		if r.SNI != "" {
+			fmt.Fprintf(f, "%s:%s#%s\n", r.IP, r.Port, r.SNI)
+		} else {
+			fmt.Fprintf(f, "%s:%s\n", r.IP, r.Port)
+		}
 	}
 	return nil
 }
@@ -63,8 +67,9 @@ func writeTXT(results []scanner.ProbeResult, path string) error {
 	}
 	defer f.Close()
 	for _, r := range results {
-		line := fmt.Sprintf("%s:%s | latency=%dms | range=%s | tcp=%s tls=%s http=%s http2=%s | service=%s",
+		line := fmt.Sprintf("%s:%s | sni=%s | latency=%dms | range=%s | tcp=%s tls=%s http=%s http2=%s | service=%s",
 			r.IP, r.Port,
+			nvl(r.SNI, "-"),
 			r.Latency.Milliseconds(),
 			r.SourceRange,
 			boolOK(r.TCPSuccess), boolOK(r.TLSSuccess),
@@ -112,7 +117,7 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
-	header := []string{"ip", "port", "latency_ms", "source_range", "tcp", "tls", "http", "http2",
+	header := []string{"ip", "port", "sni", "latency_ms", "source_range", "tcp", "tls", "http", "http2",
 		"scan_type", "server", "tls_version", "tls_cipher", "alpn", "cf_ray", "service",
 		"ping_ms", "jitter_ms", "download_mbps", "upload_mbps",
 		"best_fragment", "sni_front",
@@ -124,7 +129,7 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 
 	for _, r := range results {
 		row := []string{
-			r.IP, r.Port,
+			r.IP, r.Port, r.SNI,
 			fmt.Sprintf("%d", r.Latency.Milliseconds()),
 			r.SourceRange,
 			boolStr(r.TCPSuccess), boolStr(r.TLSSuccess),
@@ -158,20 +163,21 @@ func printSummary(results []scanner.ProbeResult, mainPath, listPath string, elap
 	fmt.Printf("\n%s%s=== cf-knife scan results ===%s\n\n", bold, cyan, reset)
 
 	// Header
-	fmt.Printf("%s%-40s %-6s %8s  %-20s  %-4s %-4s %-5s %-6s  %s%s\n",
+	fmt.Printf("%s%-40s %-6s %-22s %8s  %-20s  %-4s %-4s %-5s %-6s  %s%s\n",
 		bold,
-		"IP", "PORT", "LATENCY", "RANGE", "TCP", "TLS", "HTTP", "HTTP2", "SERVICE",
+		"IP", "PORT", "SNI", "LATENCY", "RANGE", "TCP", "TLS", "HTTP", "HTTP2", "SERVICE",
 		reset,
 	)
-	fmt.Println(strings.Repeat("─", 110))
+	fmt.Println(strings.Repeat("─", 135))
 
 	limit := len(results)
 	if limit > 50 {
 		limit = 50
 	}
 	for _, r := range results[:limit] {
-		fmt.Printf("%-40s %-6s %6dms  %-20s  %s %s %s %s  %s\n",
+		fmt.Printf("%-40s %-6s %-22s %6dms  %-20s  %s %s %s %s  %s\n",
 			r.IP, r.Port,
+			truncate(nvl(r.SNI, "-"), 22),
 			r.Latency.Milliseconds(),
 			truncate(r.SourceRange, 20),
 			colorBool(r.TCPSuccess, green, red, reset),
@@ -185,7 +191,7 @@ func printSummary(results []scanner.ProbeResult, mainPath, listPath string, elap
 		fmt.Printf("  ... and %d more\n", len(results)-50)
 	}
 
-	fmt.Println(strings.Repeat("─", 110))
+	fmt.Println(strings.Repeat("─", 135))
 	fmt.Printf("\n%sStats:%s  %d clean results  |  elapsed %s  |  %.0f targets/sec\n",
 		bold, reset,
 		len(results), elapsed.Round(time.Millisecond),

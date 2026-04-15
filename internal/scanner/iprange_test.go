@@ -91,7 +91,7 @@ func TestExpandEntry_Invalid(t *testing.T) {
 func TestExpandCIDRs_PortMatrix(t *testing.T) {
 	entries := []string{"10.0.0.0/30"}
 	ports := []string{"443", "80"}
-	targets, err := expandCIDRs(entries, ports, false, false)
+	targets, err := expandCIDRs(entries, ports, false, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestExpandCIDRs_PortMatrix(t *testing.T) {
 }
 
 func TestExpandCIDRs_SingleIP(t *testing.T) {
-	targets, err := expandCIDRs([]string{"8.8.8.8"}, []string{"53"}, false, false)
+	targets, err := expandCIDRs([]string{"8.8.8.8"}, []string{"53"}, false, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestExpandCIDRs_SingleIP(t *testing.T) {
 func TestExpandCIDRs_IPv4OnlyFilter(t *testing.T) {
 	entries := []string{"::1"}
 	ports := []string{"443"}
-	targets, err := expandCIDRs(entries, ports, true, false)
+	targets, err := expandCIDRs(entries, ports, true, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestExpandCIDRs_IPv4OnlyFilter(t *testing.T) {
 func TestExpandCIDRs_IPv6OnlyFilter(t *testing.T) {
 	entries := []string{"1.1.1.1"}
 	ports := []string{"443"}
-	targets, err := expandCIDRs(entries, ports, false, true)
+	targets, err := expandCIDRs(entries, ports, false, true, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestExpandCIDRs_IPv6OnlyFilter(t *testing.T) {
 func TestExpandCIDRs_MixedEntries(t *testing.T) {
 	entries := []string{"10.0.0.0/31", "192.168.1.1"}
 	ports := []string{"443"}
-	targets, err := expandCIDRs(entries, ports, false, false)
+	targets, err := expandCIDRs(entries, ports, false, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

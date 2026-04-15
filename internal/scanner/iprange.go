@@ -25,7 +25,8 @@ const fastlyIPListURL = "https://api.fastly.com/public-ip-list"
 
 // LoadTargets resolves all three input modes into a flat slice of Targets.
 // Priority: --ips > --input-file > official ranges (Cloudflare or Fastly).
-func LoadTargets(ctx context.Context, ips, inputFile string, ports []string, ipv4Only, ipv6Only, shuffle, fastlyRanges bool) ([]Target, error) {
+// When samplePerSubnet > 0, only that many random IPs are kept from each CIDR.
+func LoadTargets(ctx context.Context, ips, inputFile string, ports []string, ipv4Only, ipv6Only, shuffle, fastlyRanges bool, samplePerSubnet int) ([]Target, error) {
 	var cidrs []string
 
 	switch {
@@ -56,7 +57,7 @@ func LoadTargets(ctx context.Context, ips, inputFile string, ports []string, ipv
 		cidrs = fetched
 	}
 
-	targets, err := expandCIDRs(cidrs, ports, ipv4Only, ipv6Only)
+	targets, err := expandCIDRs(cidrs, ports, ipv4Only, ipv6Only, samplePerSubnet)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +163,8 @@ func readLines(r io.Reader) ([]string, error) {
 
 // expandCIDRs converts a mix of bare IPs and CIDRs into per-port Targets,
 // recording the original source range for each.
-func expandCIDRs(entries []string, ports []string, ipv4Only, ipv6Only bool) ([]Target, error) {
+// When sampleN > 0, at most sampleN IPs are randomly selected per CIDR entry.
+func expandCIDRs(entries []string, ports []string, ipv4Only, ipv6Only bool, sampleN int) ([]Target, error) {
 	var targets []Target
 
 	for _, entry := range entries {
@@ -171,6 +173,8 @@ func expandCIDRs(entries []string, ports []string, ipv4Only, ipv6Only bool) ([]T
 			return nil, fmt.Errorf("expand %q: %w", entry, err)
 		}
 
+		// Apply address-family filter before sampling.
+		filtered := ips[:0]
 		for _, ip := range ips {
 			if ipv4Only && ip.To4() == nil {
 				continue
@@ -178,6 +182,17 @@ func expandCIDRs(entries []string, ports []string, ipv4Only, ipv6Only bool) ([]T
 			if ipv6Only && ip.To4() != nil {
 				continue
 			}
+			filtered = append(filtered, ip)
+		}
+
+		if sampleN > 0 && len(filtered) > sampleN {
+			rand.Shuffle(len(filtered), func(i, j int) {
+				filtered[i], filtered[j] = filtered[j], filtered[i]
+			})
+			filtered = filtered[:sampleN]
+		}
+
+		for _, ip := range filtered {
 			ipStr := ip.String()
 			for _, port := range ports {
 				targets = append(targets, Target{

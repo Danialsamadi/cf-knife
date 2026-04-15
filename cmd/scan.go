@@ -32,7 +32,7 @@ func init() {
 
 	f := scanCmd.Flags()
 	f.StringP("port", "p", "443,80,8443,2053,2083", "comma-separated ports")
-	f.String("sni", "www.cloudflare.com", "SNI hostname for TLS handshake")
+	f.String("sni", "www.cloudflare.com", "comma-separated SNI hostnames for TLS (matrix scan when multiple)")
 	f.IntP("threads", "t", 200, "number of concurrent workers (1-10000)")
 	f.Duration("timeout", 3_000_000_000, "per-probe timeout") // 3s
 	f.Int("retries", 2, "number of retries per probe")
@@ -66,6 +66,8 @@ func init() {
 	f.Bool("warp", false, "scan for reachable Cloudflare WARP UDP endpoints")
 	f.Int("warp-port", 2408, "UDP port for WARP probing")
 
+	f.Int("sample", 0, "randomly sample N IPs per subnet (0=all)")
+	f.Bool("http-fragment", false, "send HTTP payload in 2-byte chunks with delays (app-layer DPI bypass)")
 	f.Bool("fastly-ranges", false, "use Fastly edge IP ranges instead of Cloudflare")
 	f.Bool("cert-check", false, "validate TLS certificates and detect MITM")
 	f.Bool("smart-retry", false, "auto-relax thresholds if strict settings find nothing")
@@ -116,12 +118,33 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Println("loading targets...")
 	}
 	targets, err := scanner.LoadTargets(ctx, cfg.IPs, cfg.InputFile, cfg.Ports,
-		cfg.IPv4Only, cfg.IPv6Only, cfg.Shuffle, cfg.FastlyRanges)
+		cfg.IPv4Only, cfg.IPv6Only, cfg.Shuffle, cfg.FastlyRanges, cfg.SamplePerSubnet)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("loaded %d targets (%d IPs × %d ports)\n",
-		len(targets), len(targets)/maxInt(len(cfg.Ports), 1), len(cfg.Ports))
+	// Multi-SNI expansion: when multiple SNIs are given, create one target per
+	// IP+port+SNI combination so each SNI is tested independently.
+	if len(cfg.SNIs) > 1 {
+		expanded := make([]scanner.Target, 0, len(targets)*len(cfg.SNIs))
+		for _, t := range targets {
+			for _, sni := range cfg.SNIs {
+				expanded = append(expanded, scanner.Target{
+					IP:          t.IP,
+					Port:        t.Port,
+					SourceRange: t.SourceRange,
+					SNI:         sni,
+				})
+			}
+		}
+		targets = expanded
+		fmt.Printf("loaded %d targets (%d IPs × %d ports × %d SNIs)\n",
+			len(targets),
+			len(targets)/maxInt(len(cfg.Ports)*len(cfg.SNIs), 1),
+			len(cfg.Ports), len(cfg.SNIs))
+	} else {
+		fmt.Printf("loaded %d targets (%d IPs × %d ports)\n",
+			len(targets), len(targets)/maxInt(len(cfg.Ports), 1), len(cfg.Ports))
+	}
 
 	// Parse DPI fragment sizes if needed.
 	var fragSizes []int
@@ -150,6 +173,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		DPIAnalysis:   cfg.DPIAnalysis,
 		FragmentSizes: fragSizes,
 		CertCheck:     cfg.CertCheck,
+		HTTPFragment:  cfg.HTTPFragment,
 	}
 
 	sc := &scanner.Scanner{
@@ -313,6 +337,7 @@ func filterResults(results []scanner.ProbeResult, maxLatency time.Duration) (cle
 				IP:          r.IP,
 				Port:        r.Port,
 				SourceRange: r.SourceRange,
+				SNI:         r.SNI,
 			})
 		}
 	}

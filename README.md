@@ -10,6 +10,9 @@ cf-knife probes IP addresses across multiple ports using a layered approach: TCP
 
 - **Multi-CDN support**: Cloudflare and Fastly edge fingerprinting with auto-fetched IP ranges
 - **Layered probes**: TCP, TLS, HTTP/1.1, HTTP/2 -- run any combination per target
+- **Multi-SNI matrix scan**: Comma-separated `--sni` hostnames expand into separate targets (each IP×port is probed once per SNI)
+- **Subnet sampling**: `--sample N` randomly keeps up to *N* addresses per CIDR before scanning (useful for huge ranges)
+- **HTTP fragment probe**: Optional `--http-fragment` sends the HTTP probe payload in small chunks with delays (app-layer DPI / filtering experiments)
 - **Scan engines**: `connect` (default), `fast` (aggressive timeouts), `syn` (stub with fallback)
 - **Performance metrics**: Real ping/jitter (ICMP or TCP-based) and download/upload speed testing
 - **DPI bypass analysis**: TLS ClientHello fragmentation and SNI fronting enumeration
@@ -81,6 +84,26 @@ Scan Fastly edge nodes instead of Cloudflare:
 ./cf-knife scan --fastly-ranges --script fastly -p 443
 ```
 
+Same IPs, multiple TLS server names (each `--sni` becomes its own target):
+
+```bash
+./cf-knife scan --ips 1.1.1.1,1.0.0.1 -p 443 \
+  --sni "www.cloudflare.com,example.com" \
+  -o multi-sni.txt
+```
+
+Sample a few random hosts per CIDR instead of expanding the whole range:
+
+```bash
+./cf-knife scan --ips 104.16.0.0/16 -p 443 --sample 200 --timing 4 -o sampled.txt
+```
+
+HTTP/HTTPS probe using fragmented request writes (compare with a normal run without the flag):
+
+```bash
+./cf-knife scan --ips 1.1.1.1 -p 443 --mode http --http-fragment -o http-frag.txt
+```
+
 ---
 
 ## Command Reference
@@ -100,6 +123,7 @@ cf-knife has one subcommand: `scan`.
 | `--ipv4-only` | | `false` | Only scan IPv4 addresses. |
 | `--ipv6-only` | | `false` | Only scan IPv6 addresses. |
 | `--shuffle` | | `false` | Randomize target order before scanning. |
+| `--sample` | | `0` | Randomly sample up to *N* IPs per CIDR subnet (`0` = expand every address in range). |
 | `--fastly-ranges` | | `false` | Use Fastly edge IP ranges instead of Cloudflare (fetched from `api.fastly.com`). |
 
 If none of `--ips`, `--input-file`, or `--fastly-ranges` is provided, cf-knife fetches official Cloudflare IP ranges automatically.
@@ -114,7 +138,7 @@ If none of `--ips`, `--input-file`, or `--fastly-ranges` is provided, cf-knife f
 | `--test-tls` | | `false` | Force TLS test regardless of mode. |
 | `--test-http` | | `false` | Force HTTP/1.1 test regardless of mode. |
 | `--test-http2` | | `false` | Force HTTP/2 test regardless of mode. |
-| `--sni` | | `www.cloudflare.com` | SNI hostname for TLS handshake. |
+| `--sni` | | `www.cloudflare.com` | SNI hostname(s) for TLS. Comma-separated values run a **matrix scan**: each IP×port is tested with every listed hostname. |
 | `--http-url` | | `https://www.cloudflare.com/cdn-cgi/trace` | URL fetched during HTTP/HTTP2 probes. |
 | `--scan-type` | | `connect` | Scan engine: `connect`, `fast`, `syn`. |
 | `--script` | | _(none)_ | Run a detection script: `cloudflare` or `fastly`. |
@@ -149,6 +173,7 @@ If none of `--ips`, `--input-file`, or `--fastly-ranges` is provided, cf-knife f
 | `--speed-test` | `false` | Measure ICMP ping, jitter, and HTTP download/upload speed per target. |
 | `--dpi` | `false` | Enumerate DPI fragment sizes and find the best SNI front per target. |
 | `--fragment-sizes` | `10,50,100,200,500` | Comma-separated fragment sizes (bytes) for DPI testing. |
+| `--http-fragment` | `false` | Use chunked HTTP requests (small writes with delays) instead of a normal HEAD for HTTP/HTTPS probes. |
 | `--cert-check` | `false` | Validate TLS certificates against known CDN issuers and flag MITM. |
 | `--smart-retry` | `false` | Auto-relax `max-latency` (2x) and `timeout` (1.5x) if no results pass filters. |
 | `--warp` | `false` | Scan for reachable Cloudflare WARP UDP endpoints. |
@@ -176,6 +201,26 @@ If none of `--ips`, `--input-file`, or `--fastly-ranges` is provided, cf-knife f
 |------|---------|-------------|
 | `--config` | _(none)_ | Path to a JSON configuration file. CLI flags override file values. |
 | `--save-config` | `false` | Save current flags to a JSON config file and exit. |
+
+### Reference examples (copy-paste)
+
+Multi-SNI (matrix):
+
+```bash
+./cf-knife scan --ips 1.0.0.0/28 -p 443 --sni "a.example.com,b.example.com" -o out.txt
+```
+
+Subnet sampling:
+
+```bash
+./cf-knife scan -i ranges.txt -p 443 --sample 25 -o out.txt
+```
+
+HTTP fragment probe (requires HTTP layer, e.g. `--mode http` or `full`):
+
+```bash
+./cf-knife scan --ips 8.8.8.8 -p 443 --mode full --http-fragment -o out.txt
+```
 
 ---
 
@@ -472,6 +517,70 @@ Reuse it later (CLI flags still override file values):
 
 This runs everything: TCP/TLS/HTTP/H2 probes, Cloudflare fingerprinting, speed testing, DPI analysis, certificate validation, smart retry, and persistent state -- all in one pass.
 
+### 17. Multi-SNI matrix scan
+
+Test each IP and port against several hostnames. Target count is *addresses × ports × SNIs*.
+
+```bash
+./cf-knife scan \
+  --ips 104.16.0.0/25 \
+  -p 443,8443 \
+  --sni "www.cloudflare.com,cf-ns.com,www.example.com" \
+  --timing 4 \
+  -o sni-matrix.txt
+```
+
+Console line when loading (128 addresses × 2 ports × 3 SNIs = 768 targets):
+
+```
+loaded 768 targets (128 IPs × 2 ports × 3 SNIs)
+```
+
+### 18. Subnet sampling (`--sample`)
+
+Useful when an input CIDR is too large for a full sweep; keeps up to *N* random IPs **per CIDR line** before ports are applied.
+
+```bash
+./cf-knife scan \
+  -i cloudflare-ranges.txt \
+  -p 443 \
+  --sample 100 \
+  --shuffle \
+  -o spot-check.txt
+```
+
+Single-line equivalent for one big range:
+
+```bash
+./cf-knife scan --ips 104.16.0.0/14 -p 443 --sample 500 --rate 2000 -o sampled.txt
+```
+
+### 19. HTTP fragment probe (`--http-fragment`)
+
+Runs the HTTP/HTTPS probe with small chunked writes and delays instead of a single HEAD. Combine with `--mode http` if you only need HTTP/1.1, or `--mode full` for the full stack.
+
+```bash
+./cf-knife scan \
+  --ips 1.1.1.1 \
+  -p 443 \
+  --mode full \
+  --http-fragment \
+  --http-url "https://www.cloudflare.com/cdn-cgi/trace" \
+  -o fragment-probe.txt
+```
+
+Combined workflow (matrix + sampling + fragment) in one run:
+
+```bash
+./cf-knife scan \
+  --ips 104.16.0.0/20 \
+  -p 443 \
+  --sni "www.cloudflare.com,www.example.com" \
+  --sample 50 \
+  --http-fragment \
+  -o matrix-scan.txt
+```
+
 ---
 
 ## Output Format
@@ -570,6 +679,8 @@ Pressing Ctrl-C during a scan triggers graceful shutdown:
 - `--smart-retry` prevents wasted scans when initial thresholds are too strict.
 - `--db scan.db` ensures you never lose progress on large scans. Resume with `--resume`.
 - Large CIDR ranges (/12) are capped at ~1M IPs per range. Use `--shuffle` for random sampling.
+- Use `--sample N` to randomly cap hosts per CIDR: `./cf-knife scan --ips 104.24.0.0/13 -p 443 --sample 300 -o t.txt`
+- Compare TLS/HTTP behavior across hostnames: `./cf-knife scan --ips 1.1.1.1 -p 443 --sni "h1.com,h2.com" -o m.txt`
 - Combine `--cert-check` with `--script cloudflare` to detect MITM proxies in your network.
 
 ---

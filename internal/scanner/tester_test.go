@@ -395,3 +395,34 @@ func TestProbe_HTTPMode_LocalHTTPS(t *testing.T) {
 		t.Errorf("CFRay = %q, want %q", res.CFRay, "test-ray-123")
 	}
 }
+
+func TestProbe_HTTP2Mode_LocalHTTP2Server(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "h2-test")
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	target := Target{IP: "127.0.0.1", Port: port, SourceRange: "local"}
+	pc := &ProbeConfig{
+		SNI:      "127.0.0.1",
+		Mode:     ModeHTTP2,
+		Timeout:  5 * time.Second,
+		ScanType: ScanConnect,
+		HTTPURL:  srv.URL + "/",
+	}
+
+	res := Probe(context.Background(), target, pc)
+	if !res.TLSSuccess {
+		t.Fatalf("TLSSuccess = false (err: %s)", res.Error)
+	}
+	if !res.HTTP2Success {
+		t.Fatalf("HTTP2Success = false (err: %s)", res.Error)
+	}
+	if res.ServerHeader != "h2-test" {
+		t.Errorf("ServerHeader = %q, want %q", res.ServerHeader, "h2-test")
+	}
+}

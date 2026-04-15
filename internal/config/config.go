@@ -14,6 +14,7 @@ import (
 type Config struct {
 	Ports      []string      `json:"ports" mapstructure:"ports"`
 	SNI        string        `json:"sni" mapstructure:"sni"`
+	SNIs       []string      `json:"snis"`
 	Threads    int           `json:"threads" mapstructure:"threads"`
 	Timeout    time.Duration `json:"timeout" mapstructure:"timeout"`
 	Retries    int           `json:"retries" mapstructure:"retries"`
@@ -47,6 +48,9 @@ type Config struct {
 	WARPScan      bool   `json:"warp" mapstructure:"warp"`
 	WARPPort      int    `json:"warp_port" mapstructure:"warp-port"`
 
+	SamplePerSubnet int  `json:"sample_per_subnet" mapstructure:"sample"`
+	HTTPFragment    bool `json:"http_fragment" mapstructure:"http-fragment"`
+
 	FastlyRanges bool   `json:"fastly_ranges" mapstructure:"fastly-ranges"`
 	CertCheck    bool   `json:"cert_check" mapstructure:"cert-check"`
 	SmartRetry   bool   `json:"smart_retry" mapstructure:"smart-retry"`
@@ -64,9 +68,16 @@ func Load(v *viper.Viper) (*Config, error) {
 		return nil, fmt.Errorf("at least one port is required")
 	}
 
+	sniStr := v.GetString("sni")
+	snis := splitTrim(sniStr)
+	if len(snis) == 0 {
+		snis = []string{"www.cloudflare.com"}
+	}
+
 	cfg := &Config{
 		Ports:      ports,
-		SNI:        v.GetString("sni"),
+		SNI:        snis[0],
+		SNIs:       snis,
 		Threads:    v.GetInt("threads"),
 		Timeout:    v.GetDuration("timeout"),
 		Retries:    v.GetInt("retries"),
@@ -99,6 +110,9 @@ func Load(v *viper.Viper) (*Config, error) {
 		FragmentSizes: v.GetString("fragment-sizes"),
 		WARPScan:      v.GetBool("warp"),
 		WARPPort:      v.GetInt("warp-port"),
+
+		SamplePerSubnet: v.GetInt("sample"),
+		HTTPFragment:    v.GetBool("http-fragment"),
 
 		FastlyRanges: v.GetBool("fastly-ranges"),
 		CertCheck:    v.GetBool("cert-check"),

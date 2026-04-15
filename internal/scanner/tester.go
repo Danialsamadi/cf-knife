@@ -32,6 +32,7 @@ type ProbeConfig struct {
 	DPIAnalysis   bool
 	FragmentSizes []int
 	CertCheck     bool
+	HTTPFragment  bool
 }
 
 // ShouldTCP returns true if TCP probing is enabled by mode or explicit flag.
@@ -57,9 +58,15 @@ func (pc *ProbeConfig) ShouldHTTP2() bool {
 // Probe runs all enabled tests against a single Target and returns a result.
 // The function respects ctx for cancellation and applies per-probe retries.
 func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
+	sni := pc.SNI
+	if t.SNI != "" {
+		sni = t.SNI
+	}
+
 	res := ProbeResult{
 		IP:          t.IP,
 		Port:        t.Port,
+		SNI:         sni,
 		SourceRange: t.SourceRange,
 		ScanType:    string(pc.ScanType),
 	}
@@ -109,7 +116,7 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	var tlsConn *tls.Conn
 	if pc.ShouldTLS() && isTLSPort {
 		var err error
-		tlsConn, err = retryTLS(ctx, pc.Retries, addr, pc.SNI, pc.Timeout)
+		tlsConn, err = retryTLS(ctx, pc.Retries, addr, sni, pc.Timeout)
 		if err != nil {
 			res.Error = fmt.Sprintf("tls: %v", err)
 			if !res.TCPSuccess {
@@ -138,11 +145,19 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 
 	// HTTP/1.1
 	if pc.ShouldHTTP() && isTLSPort {
-		hdrs, err := retryVal(ctx, pc.Retries, func() (http.Header, error) {
-			return probeHTTP(ctx, addr, pc.SNI, pc.Timeout, pc.HTTPURL)
-		})
-		if err != nil {
-			res.Error = fmt.Sprintf("http: %v", err)
+		var hdrs http.Header
+		var httpErr error
+		if pc.HTTPFragment {
+			hdrs, httpErr = retryVal(ctx, pc.Retries, func() (http.Header, error) {
+				return probeHTTPFragmented(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
+			})
+		} else {
+			hdrs, httpErr = retryVal(ctx, pc.Retries, func() (http.Header, error) {
+				return probeHTTP(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
+			})
+		}
+		if httpErr != nil {
+			res.Error = fmt.Sprintf("http: %v", httpErr)
 		} else {
 			res.HTTPSuccess = true
 			extractHeaders(&res, hdrs)
@@ -152,7 +167,7 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	// HTTP/2
 	if pc.ShouldHTTP2() && isTLSPort {
 		hdrs, err := retryVal(ctx, pc.Retries, func() (http.Header, error) {
-			return probeHTTP2(ctx, addr, pc.SNI, pc.Timeout, pc.HTTPURL)
+			return probeHTTP2(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
 		})
 		if err != nil {
 			res.Error = fmt.Sprintf("http2: %v", err)
@@ -170,21 +185,21 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	// Performance metrics: ICMP ping/jitter and HTTP speed.
 	if pc.SpeedTest && res.TCPSuccess {
 		res.PingMs, res.JitterMs, _ = ProbePing(ctx, t.IP, 5, pc.Timeout)
-		res.DownloadMbps, res.UploadMbps, _ = ProbeSpeed(ctx, addr, pc.SNI, pc.Timeout)
+		res.DownloadMbps, res.UploadMbps, _ = ProbeSpeed(ctx, addr, sni, pc.Timeout)
 	}
 
 	// DPI fragment enumeration and SNI fronting.
 	if pc.DPIAnalysis && res.TCPSuccess && isTLSPort {
-		res.BestFragmentSize, _ = ProbeDPI(ctx, addr, pc.SNI, pc.Timeout, pc.FragmentSizes)
+		res.BestFragmentSize, _ = ProbeDPI(ctx, addr, sni, pc.Timeout, pc.FragmentSizes)
 		res.SNIFront, _ = ProbeSNIFronting(ctx, addr, DefaultSNIList, pc.Timeout)
 	}
 
 	// Script probes run after standard probes succeed.
 	switch {
 	case pc.Script == "cloudflare" && res.TCPSuccess:
-		RunCloudflareScript(ctx, &res, pc.SNI, pc.Timeout)
+		RunCloudflareScript(ctx, &res, sni, pc.Timeout)
 	case pc.Script == "fastly" && res.TCPSuccess:
-		RunFastlyScript(ctx, &res, pc.SNI, pc.Timeout)
+		RunFastlyScript(ctx, &res, sni, pc.Timeout)
 	}
 
 	return res

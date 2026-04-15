@@ -118,7 +118,7 @@ func TestWriteCSV(t *testing.T) {
 	}
 
 	header := records[0]
-	if header[0] != "ip" || header[1] != "port" || header[2] != "latency_ms" {
+	if header[0] != "ip" || header[1] != "port" || header[2] != "sni" || header[3] != "latency_ms" {
 		t.Errorf("unexpected header: %v", header)
 	}
 

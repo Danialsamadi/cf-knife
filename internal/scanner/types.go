@@ -2,17 +2,19 @@ package scanner
 
 import "time"
 
-// Target represents a single IP+port job for the worker pool.
+// Target represents a single IP+port+SNI job for the worker pool.
 type Target struct {
 	IP          string
 	Port        string
 	SourceRange string // CIDR or "single" that this IP was expanded from
+	SNI         string // per-target SNI override; empty = use ProbeConfig.SNI
 }
 
 // ProbeResult holds the outcome of all enabled probes for one target.
 type ProbeResult struct {
 	IP          string        `json:"ip"`
 	Port        string        `json:"port"`
+	SNI         string        `json:"sni,omitempty"`
 	SourceRange string        `json:"source_range"`
 	Latency     time.Duration `json:"latency_ms"`
 

@@ -200,6 +200,116 @@ func testSNI(ctx context.Context, addr, sni string, timeout time.Duration) (time
 	return 0, false
 }
 
+// probeHTTPFragmented performs an HTTP/1.1 request over TLS but sends the HTTP
+// payload in small chunks with inter-chunk delays. This bypasses DPI systems
+// that inspect application-layer HTTP headers after the TLS handshake.
+// Returns the response headers on success.
+func probeHTTPFragmented(ctx context.Context, addr, sni string, timeout time.Duration, httpURL string) (http.Header, error) {
+	d := net.Dialer{Timeout: timeout}
+	rawConn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	tlsCfg := &tls.Config{
+		ServerName:         sni,
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"http/1.1"},
+	}
+	tlsConn := tls.Client(rawConn, tlsCfg)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	defer tlsConn.Close()
+	tlsConn.SetDeadline(time.Now().Add(timeout))
+
+	payload := fmt.Sprintf(
+		"HEAD %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: cf-knife/1.0\r\nConnection: close\r\n\r\n",
+		httpURL, sni,
+	)
+
+	const chunkSize = 2
+	const chunkDelay = 5 * time.Millisecond
+
+	data := []byte(payload)
+	for len(data) > 0 {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		n := chunkSize
+		if n > len(data) {
+			n = len(data)
+		}
+		if _, err := tlsConn.Write(data[:n]); err != nil {
+			return nil, fmt.Errorf("fragmented write: %w", err)
+		}
+		data = data[n:]
+		if len(data) > 0 {
+			time.Sleep(chunkDelay)
+		}
+	}
+
+	buf := make([]byte, 4096)
+	nRead, err := tlsConn.Read(buf)
+	if err != nil && nRead == 0 {
+		return nil, fmt.Errorf("fragmented read: %w", err)
+	}
+
+	resp := string(buf[:nRead])
+	hdrs := http.Header{}
+	lines := splitHTTPHeaderLines(resp)
+	for _, line := range lines {
+		if idx := indexByte(line, ':'); idx > 0 {
+			key := line[:idx]
+			val := line[idx+1:]
+			for len(val) > 0 && val[0] == ' ' {
+				val = val[1:]
+			}
+			hdrs.Add(key, val)
+		}
+	}
+	return hdrs, nil
+}
+
+func splitHTTPHeaderLines(raw string) []string {
+	var lines []string
+	headerEnd := raw
+	if idx := findHeaderEnd(raw); idx >= 0 {
+		headerEnd = raw[:idx]
+	}
+	start := 0
+	for i := 0; i < len(headerEnd); i++ {
+		if i+1 < len(headerEnd) && headerEnd[i] == '\r' && headerEnd[i+1] == '\n' {
+			lines = append(lines, headerEnd[start:i])
+			start = i + 2
+			i++
+		}
+	}
+	if start < len(headerEnd) {
+		lines = append(lines, headerEnd[start:])
+	}
+	return lines
+}
+
+func findHeaderEnd(s string) int {
+	for i := 0; i+3 < len(s); i++ {
+		if s[i] == '\r' && s[i+1] == '\n' && s[i+2] == '\r' && s[i+3] == '\n' {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
+}
+
 // ParseFragmentSizes converts a comma-separated string of integers into a
 // slice, validating that each value is positive.
 func ParseFragmentSizes(s string) ([]int, error) {
