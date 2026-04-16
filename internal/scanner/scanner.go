@@ -32,7 +32,7 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 	}
 
 	var completed atomic.Int64
-	var tcpOK, tlsOK, httpOK, h2OK, errCount atomic.Int64
+	var tcpOK, tlsOK, httpOK, h2OK, h3OK, errCount atomic.Int64
 	total := int64(len(targets))
 	scanDone := make(chan struct{})
 	start := time.Now()
@@ -61,9 +61,9 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 					secs := time.Since(start).Seconds()
 					rate := float64(n) / secs
 					pb.Println(fmt.Sprintf(
-						"  \033[36m%d/%d\033[0m scanned | \033[32mTCP:%d TLS:%d HTTP:%d H2:%d\033[0m | \033[31merr:%d\033[0m | %.0f/s",
+						"  \033[36m%d/%d\033[0m scanned | \033[32mTCP:%d TLS:%d HTTP:%d H2:%d H3:%d\033[0m | \033[31merr:%d\033[0m | %.0f/s",
 						n, total,
-						tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(),
+						tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(), h3OK.Load(),
 						errCount.Load(), rate,
 					))
 				case <-scanDone:
@@ -117,6 +117,9 @@ func (s *Scanner) Run(ctx context.Context, targets []Target) {
 				if res.HTTP2Success {
 					h2OK.Add(1)
 				}
+				if res.HTTP3Success {
+					h3OK.Add(1)
+				}
 				if res.Error != "" {
 					errCount.Add(1)
 				}
@@ -159,8 +162,8 @@ dispatch:
 
 	elapsed := time.Since(start)
 	fmt.Printf("\n  Scan complete in %s — %d targets scanned\n", elapsed.Round(time.Millisecond), total)
-	fmt.Printf("  TCP: %d  TLS: %d  HTTP: %d  H2: %d  Errors: %d\n\n",
-		tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(), errCount.Load())
+	fmt.Printf("  TCP: %d  TLS: %d  HTTP: %d  H2: %d  H3: %d  Errors: %d\n\n",
+		tcpOK.Load(), tlsOK.Load(), httpOK.Load(), h2OK.Load(), h3OK.Load(), errCount.Load())
 
 	s.Results = results
 }
