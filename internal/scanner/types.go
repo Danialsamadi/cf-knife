@@ -22,6 +22,7 @@ type ProbeResult struct {
 	TLSSuccess   bool `json:"tls_success"`
 	HTTPSuccess  bool `json:"http_success"`
 	HTTP2Success bool `json:"http2_success"`
+	HTTP3Success bool `json:"http3_success"`
 
 	ScanType string `json:"scan_type"`
 
@@ -73,6 +74,7 @@ const (
 	ModeTLS     ScanMode = "tls"
 	ModeHTTP    ScanMode = "http"
 	ModeHTTP2   ScanMode = "http2"
+	ModeHTTP3   ScanMode = "http3"
 	ModeFull    ScanMode = "full"
 )
 

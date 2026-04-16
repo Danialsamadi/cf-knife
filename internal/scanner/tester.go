@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 )
 
@@ -23,6 +25,7 @@ type ProbeConfig struct {
 	TestTLS    bool
 	TestHTTP   bool
 	TestHTTP2  bool
+	TestHTTP3  bool
 	HTTPURL    string
 	MaxLatency time.Duration
 	ScanType   ScanType
@@ -42,7 +45,7 @@ func (pc *ProbeConfig) ShouldTCP() bool {
 
 // ShouldTLS returns true if TLS probing is enabled.
 func (pc *ProbeConfig) ShouldTLS() bool {
-	return pc.TestTLS || pc.Mode == ModeTLS || pc.Mode == ModeHTTP || pc.Mode == ModeHTTP2 || pc.Mode == ModeFull
+	return pc.TestTLS || pc.Mode == ModeTLS || pc.Mode == ModeHTTP || pc.Mode == ModeHTTP2 || pc.Mode == ModeHTTP3 || pc.Mode == ModeFull
 }
 
 // ShouldHTTP returns true if HTTP/1.1 probing is enabled.
@@ -53,6 +56,11 @@ func (pc *ProbeConfig) ShouldHTTP() bool {
 // ShouldHTTP2 returns true if HTTP/2 probing is enabled.
 func (pc *ProbeConfig) ShouldHTTP2() bool {
 	return pc.TestHTTP2 || pc.Mode == ModeHTTP2 || pc.Mode == ModeFull
+}
+
+// ShouldHTTP3 returns true if HTTP/3 (QUIC) probing is enabled.
+func (pc *ProbeConfig) ShouldHTTP3() bool {
+	return pc.TestHTTP3 || pc.Mode == ModeHTTP3 || pc.Mode == ModeFull
 }
 
 // Probe runs all enabled tests against a single Target and returns a result.
@@ -177,6 +185,19 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		}
 	}
 
+	// HTTP/3 (QUIC over UDP)
+	if pc.ShouldHTTP3() && isTLSPort {
+		hdrs, err := retryVal(ctx, pc.Retries, func() (http.Header, error) {
+			return probeHTTP3(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
+		})
+		if err != nil {
+			res.Error = fmt.Sprintf("http3: %v", err)
+		} else {
+			res.HTTP3Success = true
+			extractHeaders(&res, hdrs)
+		}
+	}
+
 	// Close any lingering TLS conn.
 	if tlsConn != nil {
 		tlsConn.Close()
@@ -291,6 +312,39 @@ func probeHTTP2(ctx context.Context, addr, sni string, timeout time.Duration, ht
 	defer transport.CloseIdleConnections()
 
 	client := &http.Client{Transport: transport, Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, httpURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Host = sni
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.Header, nil
+}
+
+func probeHTTP3(ctx context.Context, addr, sni string, timeout time.Duration, httpURL string) (http.Header, error) {
+	roundTripper := &http3.Transport{
+		TLSClientConfig: &tls.Config{
+			ServerName:         sni,
+			InsecureSkipVerify: true,
+		},
+		// Dial pins the QUIC connection to the scanned addr (UDP ip:port)
+		// instead of resolving the host from the URL.
+		Dial: func(ctx context.Context, _ string, tlsCfg *tls.Config, cfg *quic.Config) (*quic.Conn, error) {
+			udpAddr, err := net.ResolveUDPAddr("udp", addr)
+			if err != nil {
+				return nil, err
+			}
+			return quic.DialEarly(ctx, nil, udpAddr, tlsCfg, cfg)
+		},
+	}
+	defer roundTripper.Close()
+
+	client := &http.Client{Transport: roundTripper, Timeout: timeout}
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, httpURL, nil)
 	if err != nil {
 		return nil, err
