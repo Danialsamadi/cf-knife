@@ -23,6 +23,7 @@ type Config struct {
 	TestTLS    bool          `json:"test_tls" mapstructure:"test-tls"`
 	TestHTTP   bool          `json:"test_http" mapstructure:"test-http"`
 	TestHTTP2  bool          `json:"test_http2" mapstructure:"test-http2"`
+	TestHTTP3  bool          `json:"test_http3" mapstructure:"test-http3"`
 	HTTPURL    string        `json:"http_url" mapstructure:"http-url"`
 	InputFile  string        `json:"input_file" mapstructure:"input-file"`
 	IPs        string        `json:"ips" mapstructure:"ips"`
@@ -86,6 +87,7 @@ func Load(v *viper.Viper) (*Config, error) {
 		TestTLS:    v.GetBool("test-tls"),
 		TestHTTP:   v.GetBool("test-http"),
 		TestHTTP2:  v.GetBool("test-http2"),
+		TestHTTP3:  v.GetBool("test-http3"),
 		HTTPURL:    v.GetString("http-url"),
 		InputFile:  v.GetString("input-file"),
 		IPs:        v.GetString("ips"),
@@ -136,9 +138,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("--timing must be between 0 and 5, got %d", c.Timing)
 	}
 
-	validModes := map[string]bool{"tcp-only": true, "tls": true, "http": true, "http2": true, "full": true}
+	validModes := map[string]bool{"tcp-only": true, "tls": true, "http": true, "http2": true, "http3": true, "full": true}
 	if !validModes[c.Mode] {
-		return fmt.Errorf("--mode must be one of tcp-only|tls|http|http2|full, got %q", c.Mode)
+		return fmt.Errorf("--mode must be one of tcp-only|tls|http|http2|http3|full, got %q", c.Mode)
 	}
 
 	validScans := map[string]bool{"connect": true, "fast": true, "syn": true}

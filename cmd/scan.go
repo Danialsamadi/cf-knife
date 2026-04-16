@@ -36,11 +36,12 @@ func init() {
 	f.IntP("threads", "t", 200, "number of concurrent workers (1-10000)")
 	f.Duration("timeout", 3_000_000_000, "per-probe timeout") // 3s
 	f.Int("retries", 2, "number of retries per probe")
-	f.String("mode", "full", "probe mode: tcp-only|tls|http|http2|full")
+	f.String("mode", "full", "probe mode: tcp-only|tls|http|http2|http3|full")
 	f.Bool("test-tcp", false, "force TCP test regardless of mode")
 	f.Bool("test-tls", false, "force TLS test regardless of mode")
 	f.Bool("test-http", false, "force HTTP/1.1 test regardless of mode")
 	f.Bool("test-http2", false, "force HTTP/2 test regardless of mode")
+	f.Bool("test-http3", false, "force HTTP/3 (QUIC) test regardless of mode")
 	f.String("http-url", "https://www.cloudflare.com/cdn-cgi/trace", "URL for HTTP probe")
 	f.StringP("input-file", "i", "", "file with IPs/CIDRs (one per line)")
 	f.String("ips", "", "comma-separated IPs or CIDRs")
@@ -165,6 +166,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		TestTLS:       cfg.TestTLS,
 		TestHTTP:      cfg.TestHTTP,
 		TestHTTP2:     cfg.TestHTTP2,
+		TestHTTP3:     cfg.TestHTTP3,
 		HTTPURL:       cfg.HTTPURL,
 		MaxLatency:    cfg.MaxLatency,
 		ScanType:      scanner.ScanType(cfg.ScanType),
@@ -329,7 +331,7 @@ func maxInt(a, b int) int {
 // be re-scanned with relaxed thresholds by the smart-retry logic.
 func filterResults(results []scanner.ProbeResult, maxLatency time.Duration) (clean []scanner.ProbeResult, retryable []scanner.Target) {
 	for _, r := range results {
-		anyOK := r.TCPSuccess || r.TLSSuccess || r.HTTPSuccess || r.HTTP2Success
+		anyOK := r.TCPSuccess || r.TLSSuccess || r.HTTPSuccess || r.HTTP2Success || r.HTTP3Success
 		if anyOK && r.Latency <= maxLatency {
 			clean = append(clean, r)
 		} else if anyOK && r.Latency > maxLatency {
