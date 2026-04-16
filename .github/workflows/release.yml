@@ -41,7 +41,7 @@ jobs:
           # Windows builds
           - os: windows
             arch: amd64
-            runner: windows-latest
+            runner: ubuntu-latest
             output: cf-knife-windows-amd64.exe
 
     steps:
@@ -65,7 +65,7 @@ jobs:
         shell: bash
 
       - name: Smoke test (native builds only)
-        if: matrix.os == 'linux' && matrix.arch == 'amd64' || matrix.os == 'windows' && matrix.arch == 'amd64' || matrix.os == 'darwin'
+        if: (matrix.os == 'linux' && matrix.arch == 'amd64') || matrix.os == 'darwin' || (matrix.os == 'windows' && matrix.runner == 'windows-latest')
         run: |
           echo "--- version ---"
           ./build/${{ matrix.output }} --version
@@ -143,8 +143,8 @@ jobs:
       - name: Check build status
         run: |
           if [ "${{ needs.build.result }}" == "success" ]; then
-            echo "✅ All binaries built successfully!"
+            echo "All binaries built successfully!"
           else
-            echo "❌ Build failed!"
+            echo "Build failed!"
             exit 1
           fi
