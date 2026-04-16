@@ -9,7 +9,7 @@ cf-knife probes IP addresses across multiple ports using a layered approach: TCP
 ### Core Features
 
 - **Multi-CDN support**: Cloudflare and Fastly edge fingerprinting with auto-fetched IP ranges
-- **Layered probes**: TCP, TLS, HTTP/1.1, HTTP/2 -- run any combination per target
+- **Layered probes**: TCP, TLS, HTTP/1.1 (labeled HTTPS), HTTP/2, HTTP/3 (QUIC) -- run any combination per target
 - **Multi-SNI matrix scan**: Comma-separated `--sni` hostnames expand into separate targets (each IP×port is probed once per SNI)
 - **Subnet sampling**: `--sample N` randomly keeps up to *N* addresses per CIDR before scanning (useful for huge ranges)
 - **HTTP fragment probe**: Optional `--http-fragment` sends the HTTP probe payload in small chunks with delays (app-layer DPI / filtering experiments)
@@ -133,11 +133,12 @@ If none of `--ips`, `--input-file`, or `--fastly-ranges` is provided, cf-knife f
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--port` | `-p` | `443,80,8443,2053,2083` | Comma-separated list of ports to scan on each IP. |
-| `--mode` | | `full` | Probe mode: `tcp-only`, `tls`, `http`, `http2`, `full`. |
+| `--mode` | | `full` | Probe mode: `tcp-only`, `tls`, `http`, `http2`, `http3`, `full`. |
 | `--test-tcp` | | `false` | Force TCP test regardless of mode. |
 | `--test-tls` | | `false` | Force TLS test regardless of mode. |
 | `--test-http` | | `false` | Force HTTP/1.1 test regardless of mode. |
 | `--test-http2` | | `false` | Force HTTP/2 test regardless of mode. |
+| `--test-http3` | | `false` | Force HTTP/3 (QUIC) test regardless of mode. |
 | `--sni` | | `www.cloudflare.com` | SNI hostname(s) for TLS. Comma-separated values run a **matrix scan**: each IP×port is tested with every listed hostname. |
 | `--http-url` | | `https://www.cloudflare.com/cdn-cgi/trace` | URL fetched during HTTP/HTTP2 probes. |
 | `--scan-type` | | `connect` | Scan engine: `connect`, `fast`, `syn`. |
@@ -232,7 +233,7 @@ HTTP fragment probe (requires HTTP layer, e.g. `--mode http` or `full`):
 ./cf-knife scan --ips 1.1.1.1 --port 443,80
 ```
 
-Runs TCP, TLS, HTTP/1.1, and HTTP/2 probes on both ports using default timing (level 3: 200 threads, 3s timeout).
+Runs TCP, TLS, HTTP/1.1, HTTP/2, and HTTP/3 probes on both ports using default timing (level 3: 200 threads, 3s timeout).
 
 ### 2. Scan from a file with aggressive timing
 
@@ -447,6 +448,7 @@ Each result is a JSON object with all probe fields:
   "tls_success": true,
   "http_success": true,
   "http2_success": true,
+  "http3_success": true,
   "tls_version": "TLS1.3",
   "tls_cipher": "TLS_AES_128_GCM_SHA256",
   "alpn": "h2",
@@ -471,7 +473,7 @@ Each result is a JSON object with all probe fields:
 CSV header includes all fields:
 
 ```
-ip,port,latency_ms,source_range,tcp,tls,http,http2,scan_type,server,tls_version,
+ip,port,latency_ms,source_range,tcp,tls,https,http2,http3,scan_type,server,tls_version,
 tls_cipher,alpn,cf_ray,service,ping_ms,jitter_ms,download_mbps,upload_mbps,
 best_fragment,sni_front,cert_issuer,cert_subject,cert_expiry,cert_mitm,error
 ```
@@ -515,7 +517,7 @@ Reuse it later (CLI flags still override file values):
   -o full-scan.csv
 ```
 
-This runs everything: TCP/TLS/HTTP/H2 probes, Cloudflare fingerprinting, speed testing, DPI analysis, certificate validation, smart retry, and persistent state -- all in one pass.
+This runs everything: TCP/TLS/HTTP/H2/H3 probes, Cloudflare fingerprinting, speed testing, DPI analysis, certificate validation, smart retry, and persistent state -- all in one pass.
 
 ### 17. Multi-SNI matrix scan
 
@@ -590,9 +592,9 @@ Combined workflow (matrix + sampling + fragment) in one run:
 Each line contains all available data for a target:
 
 ```
-1.0.0.113:443 | latency=33ms | range=1.0.0.0/24 | tcp=ok tls=ok http=ok http2=ok | service=cloudflare/LAX
-1.0.0.54:443  | latency=45ms | range=1.0.0.0/24 | tcp=ok tls=ok http=ok http2=ok | service=cloudflare/SIN | ping=12.3ms jitter=2.1ms | dl=45.67Mbps ul=12.34Mbps | frag=100 | sni_front=discord.com | cert_issuer=DigiCert Inc
-1.0.0.200:443 | latency=89ms | range=1.0.0.0/24 | tcp=ok tls=ok http=fail http2=fail | service=- | cert_issuer=Unknown CA | MITM_DETECTED
+1.0.0.113:443 | latency=33ms | range=1.0.0.0/24 | tcp=ok tls=ok https=ok http2=ok http3=ok | service=cloudflare/LAX
+1.0.0.54:443  | latency=45ms | range=1.0.0.0/24 | tcp=ok tls=ok https=ok http2=ok http3=fail | service=cloudflare/SIN | ping=12.3ms jitter=2.1ms | dl=45.67Mbps ul=12.34Mbps | frag=100 | sni_front=discord.com | cert_issuer=DigiCert Inc
+1.0.0.200:443 | latency=89ms | range=1.0.0.0/24 | tcp=ok tls=ok https=fail http2=fail http3=fail | service=- | cert_issuer=Unknown CA | MITM_DETECTED
 ```
 
 ### Clean list (clean_list.txt)
@@ -612,10 +614,10 @@ A colored table printed after each scan showing top results by latency:
 ```
 === cf-knife scan results ===
 
-IP                                       PORT   LATENCY  RANGE                 TCP  TLS  HTTP  HTTP2   SERVICE
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-1.0.0.113                                443      33ms  1.0.0.0/24              ok   ok   ok    ok   cloudflare/LAX
-1.0.0.54                                 443      45ms  1.0.0.0/24              ok   ok   ok    ok   cloudflare/SIN
+IP                                       PORT   LATENCY  RANGE                 TCP  TLS  HTTPS HTTP2 HTTP3  SERVICE
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1.0.0.113                                443      33ms  1.0.0.0/24              ok   ok   ok    ok    ok    cloudflare/LAX
+1.0.0.54                                 443      45ms  1.0.0.0/24              ok   ok   ok    ok   fail   cloudflare/SIN
 ...
 
 Stats:  128 clean results  |  elapsed 5.199s  |  24 targets/sec
@@ -629,14 +631,14 @@ Files:  result-20260413-163902.txt  |  clean_list.txt
 During a scan, real-time statistics are printed every 3 seconds:
 
 ```
-  1134/2048 scanned | TCP:1134 TLS:890 HTTP:456 H2:312 | err:120 | 378/s
+  1134/2048 scanned | TCP:1134 TLS:890 HTTP:456 H2:312 H3:104 | err:120 | 378/s
 ```
 
 After completion:
 
 ```
   Scan complete in 5.199s -- 2048 targets scanned
-  TCP: 1928  TLS: 890  HTTP: 456  H2: 312  Errors: 120
+  TCP: 1928  TLS: 890  HTTP: 456  H2: 312  H3: 104  Errors: 120
 ```
 
 ---
