@@ -335,11 +335,7 @@ func probeHTTP3(ctx context.Context, addr, sni string, timeout time.Duration, ht
 		// Dial pins the QUIC connection to the scanned addr (UDP ip:port)
 		// instead of resolving the host from the URL.
 		Dial: func(ctx context.Context, _ string, tlsCfg *tls.Config, cfg *quic.Config) (*quic.Conn, error) {
-			udpAddr, err := net.ResolveUDPAddr("udp", addr)
-			if err != nil {
-				return nil, err
-			}
-			return quic.DialEarly(ctx, nil, udpAddr, tlsCfg, cfg)
+			return quic.DialAddrEarly(ctx, addr, tlsCfg, cfg)
 		},
 	}
 	defer roundTripper.Close()
