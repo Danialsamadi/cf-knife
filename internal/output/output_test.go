@@ -17,6 +17,7 @@ func sampleResults() []scanner.ProbeResult {
 		{
 			IP: "1.1.1.1", Port: "443", SourceRange: "1.1.1.0/24",
 			Latency: 100 * time.Millisecond, TCPSuccess: true, TLSSuccess: true,
+			HTTPSuccess: true, HTTP3Success: true,
 			ScanType: "connect", ServiceName: "cloudflare",
 			ServerHeader: "cloudflare", CFRay: "abc-IAD",
 			TLSVersion: "TLS1.3", TLSCipher: "TLS_AES_128_GCM_SHA256",
@@ -47,8 +48,11 @@ func TestWriteTXT(t *testing.T) {
 	if !strings.Contains(content, "1.1.1.1:443") {
 		t.Error("TXT should contain 1.1.1.1:443")
 	}
-	if !strings.Contains(content, "tcp=ok") {
-		t.Error("TXT should contain tcp=ok")
+	if !strings.Contains(content, "https=ok") {
+		t.Error("TXT should contain https=ok")
+	}
+	if !strings.Contains(content, "http3=ok") {
+		t.Error("TXT should contain http3=ok")
 	}
 	if !strings.Contains(content, "range=1.1.1.0/24") {
 		t.Error("TXT should contain source range")
@@ -118,7 +122,7 @@ func TestWriteCSV(t *testing.T) {
 	}
 
 	header := records[0]
-	if header[0] != "ip" || header[1] != "port" || header[2] != "sni" || header[3] != "latency_ms" {
+	if header[0] != "ip" || header[7] != "https" || header[9] != "http3" {
 		t.Errorf("unexpected header: %v", header)
 	}
 

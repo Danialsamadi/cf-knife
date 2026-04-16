@@ -19,6 +19,7 @@ func TestProbeConfig_ShouldFlags(t *testing.T) {
 		wantTLS   bool
 		wantHTTP  bool
 		wantHTTP2 bool
+		wantHTTP3 bool
 	}{
 		{
 			name:      "full mode enables all",
@@ -27,6 +28,7 @@ func TestProbeConfig_ShouldFlags(t *testing.T) {
 			wantTLS:   true,
 			wantHTTP:  true,
 			wantHTTP2: true,
+			wantHTTP3: true,
 		},
 		{
 			name:    "tcp-only mode",
@@ -51,12 +53,19 @@ func TestProbeConfig_ShouldFlags(t *testing.T) {
 			wantHTTP2: true,
 		},
 		{
+			name:      "http3 mode enables tls+http3",
+			pc:        ProbeConfig{Mode: ModeHTTP3},
+			wantTLS:   true,
+			wantHTTP3: true,
+		},
+		{
 			name:      "explicit test flags override mode",
-			pc:        ProbeConfig{Mode: ModeTCPOnly, TestTLS: true, TestHTTP: true, TestHTTP2: true},
+			pc:        ProbeConfig{Mode: ModeTCPOnly, TestTLS: true, TestHTTP: true, TestHTTP2: true, TestHTTP3: true},
 			wantTCP:   true,
 			wantTLS:   true,
 			wantHTTP:  true,
 			wantHTTP2: true,
+			wantHTTP3: true,
 		},
 	}
 
@@ -73,6 +82,9 @@ func TestProbeConfig_ShouldFlags(t *testing.T) {
 			}
 			if got := tt.pc.ShouldHTTP2(); got != tt.wantHTTP2 {
 				t.Errorf("ShouldHTTP2() = %v, want %v", got, tt.wantHTTP2)
+			}
+			if got := tt.pc.ShouldHTTP3(); got != tt.wantHTTP3 {
+				t.Errorf("ShouldHTTP3() = %v, want %v", got, tt.wantHTTP3)
 			}
 		})
 	}

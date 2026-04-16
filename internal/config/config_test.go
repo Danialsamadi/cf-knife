@@ -37,6 +37,7 @@ func TestConfig_Validate(t *testing.T) {
 		{"mode tls", func(c *Config) { c.Mode = "tls" }, false},
 		{"mode http", func(c *Config) { c.Mode = "http" }, false},
 		{"mode http2", func(c *Config) { c.Mode = "http2" }, false},
+		{"mode http3", func(c *Config) { c.Mode = "http3" }, false},
 		{"bad mode", func(c *Config) { c.Mode = "invalid" }, true},
 		{"scan-type fast", func(c *Config) { c.ScanType = "fast" }, false},
 		{"scan-type syn", func(c *Config) { c.ScanType = "syn" }, false},
