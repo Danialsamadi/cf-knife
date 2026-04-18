@@ -1,5 +1,7 @@
 # cf-knife
 
+**Languages:** [فارسی (Persian) — README.fa.md](README.fa.md)
+
 A high-performance CDN IP scanner written in pure Go. Single static binary, fully cross-platform, with layered network probing, real-time progress reporting, and advanced analysis capabilities.
 
 ## Overview
@@ -42,17 +44,32 @@ Grab the latest release from [GitHub Releases](https://github.com/Danialsamadi/c
 | macOS arm64 (Apple Silicon) | `cf-knife-darwin-arm64` |
 | Windows amd64 | `cf-knife-windows-amd64.exe` |
 
+**Linux / macOS** — make the binary executable after download:
+
 ```bash
-# Linux/macOS: make executable after download
 chmod +x cf-knife-*
+```
+
+**Windows** — no `chmod`. From the folder that contains the `.exe`, run (adjust the filename if you renamed it):
+
+```powershell
+.\cf-knife-windows-amd64.exe scan --help
 ```
 
 ### Build from source
 
 Requires Go 1.25 or later.
 
+**Linux / macOS:**
+
 ```bash
 go build -o cf-knife .
+```
+
+**Windows (PowerShell or CMD):**
+
+```powershell
+go build -o cf-knife.exe .
 ```
 
 Cross-compilation examples:
@@ -65,6 +82,12 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o cf-knife.ex
 ```
 
 ## Quick Start
+
+Use **`./cf-knife`** on Linux and macOS, and **`.\cf-knife.exe`** on Windows (or `.\cf-knife-windows-amd64.exe` if you kept the release name). Flags are identical on every platform.
+
+**Line breaks:** bash examples use `\` at the end of a line. On **PowerShell**, use a trailing backtick `` ` `` instead; on **CMD**, use `^`.
+
+### Linux / macOS
 
 Scan a single IP on two ports:
 
@@ -104,6 +127,34 @@ HTTP/HTTPS probe using fragmented request writes (compare with a normal run with
 ./cf-knife scan --ips 1.1.1.1 -p 443 --mode http --http-fragment -o http-frag.txt
 ```
 
+### Windows (PowerShell)
+
+```powershell
+.\cf-knife.exe scan --ips 1.1.1.1 --port 443,80
+```
+
+```powershell
+.\cf-knife.exe scan -i ips.txt -p 443,80,8443 --timing 4 -o result.txt
+```
+
+```powershell
+.\cf-knife.exe scan --fastly-ranges --script fastly -p 443
+```
+
+```powershell
+.\cf-knife.exe scan --ips 1.1.1.1,1.0.0.1 -p 443 `
+  --sni "www.cloudflare.com,example.com" `
+  -o multi-sni.txt
+```
+
+```powershell
+.\cf-knife.exe scan --ips 104.16.0.0/16 -p 443 --sample 200 --timing 4 -o sampled.txt
+```
+
+```powershell
+.\cf-knife.exe scan --ips 1.1.1.1 -p 443 --mode http --http-fragment -o http-frag.txt
+```
+
 ---
 
 ## Command Reference
@@ -111,7 +162,11 @@ HTTP/HTTPS probe using fragmented request writes (compare with a normal run with
 cf-knife has one subcommand: `scan`.
 
 ```
+# Linux / macOS
 ./cf-knife scan [flags]
+
+# Windows (PowerShell / CMD)
+.\cf-knife.exe scan [flags]
 ```
 
 ### Input Flags
@@ -211,10 +266,18 @@ Multi-SNI (matrix):
 ./cf-knife scan --ips 1.0.0.0/28 -p 443 --sni "a.example.com,b.example.com" -o out.txt
 ```
 
+```powershell
+.\cf-knife.exe scan --ips 1.0.0.0/28 -p 443 --sni "a.example.com,b.example.com" -o out.txt
+```
+
 Subnet sampling:
 
 ```bash
 ./cf-knife scan -i ranges.txt -p 443 --sample 25 -o out.txt
+```
+
+```powershell
+.\cf-knife.exe scan -i ranges.txt -p 443 --sample 25 -o out.txt
 ```
 
 HTTP fragment probe (requires HTTP layer, e.g. `--mode http` or `full`):
@@ -223,14 +286,24 @@ HTTP fragment probe (requires HTTP layer, e.g. `--mode http` or `full`):
 ./cf-knife scan --ips 8.8.8.8 -p 443 --mode full --http-fragment -o out.txt
 ```
 
+```powershell
+.\cf-knife.exe scan --ips 8.8.8.8 -p 443 --mode full --http-fragment -o out.txt
+```
+
 ---
 
 ## Examples
+
+Throughout this section, **`./cf-knife`** means your built or downloaded binary on Linux/macOS. On Windows, run the same flags with **`.\cf-knife.exe`** (or your release `.exe` name). Multi-line **bash** commands use `\`; in **PowerShell** use `` ` `` at the end of each continued line, or put the command on one line.
 
 ### 1. Basic scan of a single IP
 
 ```bash
 ./cf-knife scan --ips 1.1.1.1 --port 443,80
+```
+
+```powershell
+.\cf-knife.exe scan --ips 1.1.1.1 --port 443,80
 ```
 
 Runs TCP, TLS, HTTP/1.1, HTTP/2, and HTTP/3 probes on both ports using default timing (level 3: 200 threads, 3s timeout).
@@ -243,6 +316,15 @@ Runs TCP, TLS, HTTP/1.1, HTTP/2, and HTTP/3 probes on both ports using default t
   -p 443,80,8443,2053,2083 \
   --timing 4 \
   -o result.txt \
+  --shuffle
+```
+
+```powershell
+.\cf-knife.exe scan `
+  -i Cloudflare-IP.txt `
+  -p 443,80,8443,2053,2083 `
+  --timing 4 `
+  -o result.txt `
   --shuffle
 ```
 
@@ -681,7 +763,7 @@ Pressing Ctrl-C during a scan triggers graceful shutdown:
 - `--smart-retry` prevents wasted scans when initial thresholds are too strict.
 - `--db scan.db` ensures you never lose progress on large scans. Resume with `--resume`.
 - Large CIDR ranges (/12) are capped at ~1M IPs per range. Use `--shuffle` for random sampling.
-- Use `--sample N` to randomly cap hosts per CIDR: `./cf-knife scan --ips 104.24.0.0/13 -p 443 --sample 300 -o t.txt`
+- Use `--sample N` to randomly cap hosts per CIDR: `./cf-knife scan --ips 104.24.0.0/13 -p 443 --sample 300 -o t.txt` (Windows: `.\cf-knife.exe scan ...` with the same flags)
 - Compare TLS/HTTP behavior across hostnames: `./cf-knife scan --ips 1.1.1.1 -p 443 --sni "h1.com,h2.com" -o m.txt`
 - Combine `--cert-check` with `--script cloudflare` to detect MITM proxies in your network.
 
