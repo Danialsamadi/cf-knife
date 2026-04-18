@@ -762,4 +762,4 @@ Files:  result-20260413-163902.txt  |  clean_list.txt
 
 ## مجوز
 
-MIT
+این پروژه تحت **GNU General Public License نسخهٔ ۳.۰** منتشر شده است — برای جزئیات، فایل [LICENSE](LICENSE) را ببینید.
