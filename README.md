@@ -791,6 +791,144 @@ After the scan, three output files are written automatically:
   -o domain-audit.csv
 ```
 
+### 21. Quick feature verification
+
+A set of targeted commands for verifying each domain-mode feature individually.
+
+**CIDR block in domain file** — expands to 6 host IPs (skips network + broadcast):
+
+```bash
+echo "104.18.0.0/29" > cidr.txt
+./cf-knife scan \
+  --domain-file cidr.txt \
+  -p 443 --mode tls \
+  --site-preflight=false \
+  --verbose \
+  -o cidr-out.txt
+```
+
+**Label field in results** — verify `label=` appears in txt output:
+
+```bash
+cat > /tmp/labeled.txt << 'EOF'
+Cloudflare Main | cloudflare.com
+Google CDN      | google.com
+Example Site    | example.com
+EOF
+
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  -p 443 --mode http --verbose \
+  -o /tmp/labeled-out.txt
+
+cat /tmp/labeled-out-*.txt
+```
+
+Each result line should contain `label=Cloudflare Main`, `label=Google CDN`, etc.
+
+**HTTP status code in CSV output** — verify `label` and `http_status` columns:
+
+```bash
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  -p 443 --mode http \
+  --output-format csv \
+  -o /tmp/labels.csv
+
+head -3 /tmp/labels-*.csv
+```
+
+Expected CSV header: `ip,port,sni,label,latency_ms,http_status,...`
+
+**Domain cache: two-run workflow** — first run creates cache, second run loads it:
+
+```bash
+# Run 1 — builds cache
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  -p 443 --mode http \
+  --domain-cache /tmp/dc.txt \
+  -o /tmp/run1.txt
+
+# Run 2 — prints "loaded N cached targets from /tmp/dc.txt"
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  -p 443 --mode http \
+  --domain-cache /tmp/dc.txt \
+  --verbose \
+  -o /tmp/run2.txt
+```
+
+**Verify all output files are created** — main results + reachable + full_log + cache:
+
+```bash
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  -p 443 --mode http \
+  --domain-cache /tmp/dc2.txt \
+  -o /tmp/report.txt
+
+ls /tmp/report-*.txt /tmp/reachable-*.txt /tmp/full_log-*.txt /tmp/dc2.txt
+```
+
+**All 13 Cloudflare ports** — expands each hostname across 6 HTTPS + 7 HTTP ports:
+
+```bash
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  --cf-all-ports \
+  --mode http \
+  -t 500 \
+  -o /tmp/all-ports.txt
+```
+
+**JSON output** — machine-readable with label + http_status fields:
+
+```bash
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  -p 443 --mode http \
+  --output-format json \
+  -o /tmp/out.json
+
+cat /tmp/out-*.json | python3 -m json.tool | head -40
+```
+
+**Preflight + HTTPS→HTTP fallback** — watch stderr for fallback messages:
+
+```bash
+./cf-knife scan \
+  --domain-file /tmp/labeled.txt \
+  -p 443 --mode http \
+  --site-preflight \
+  --timeout 5s \
+  --verbose \
+  -o /tmp/preflight.txt
+```
+
+**Smart retry + high concurrency stress test**:
+
+```bash
+./cf-knife scan \
+  --domain-file domains.txt \
+  -p 443 --mode full \
+  -t 300 \
+  --smart-retry \
+  --max-latency 2s \
+  --verbose \
+  -o /tmp/stress.txt
+```
+
+**Disable preflight** (faster, skips DNS/TCP/TLS validation before probing) — note: use `=false`, not `--no-site-preflight`:
+
+```bash
+./cf-knife scan \
+  --domain-file domains.txt \
+  -p 443 --mode http \
+  --site-preflight=false \
+  -o /tmp/fast.txt
+```
+
 ---
 
 ## Output Format
