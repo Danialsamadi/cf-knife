@@ -10,6 +10,7 @@ cf-knife probes IP addresses across multiple ports using a layered approach: TCP
 
 ### Core Features
 
+- **Domain-based scanning**: Feed a list of hostnames (`--domain-file`); each is resolved via DNS and dialed by IP with SNI/Host = original hostname — DPI-bypass semantics without touching raw IPs
 - **Multi-CDN support**: Cloudflare and Fastly edge fingerprinting with auto-fetched IP ranges
 - **Layered probes**: TCP, TLS, HTTP/1.1 (labeled HTTPS), HTTP/2, HTTP/3 (QUIC) -- run any combination per target
 - **Multi-SNI matrix scan**: Comma-separated `--sni` hostnames expand into separate targets (each IP×port is probed once per SNI)
@@ -180,8 +181,11 @@ cf-knife has one subcommand: `scan`.
 | `--shuffle` | | `false` | Randomize target order before scanning. |
 | `--sample` | | `0` | Randomly sample up to *N* IPs per CIDR subnet (`0` = expand every address in range). |
 | `--fastly-ranges` | | `false` | Use Fastly edge IP ranges instead of Cloudflare (fetched from `api.fastly.com`). |
+| `--domain-file` | | _(none)_ | Path to a file of hostnames to scan. Each host is resolved via DNS; probes dial the resolved IP with SNI and `Host` set to the original hostname (DPI-bypass). Mutually exclusive with `--ips`, `--input-file`, `--fastly-ranges`, `--warp`. |
+| `--cf-all-ports` | | `false` | When using `--domain-file`, expand each hostname across all 13 Cloudflare edge ports (6 HTTPS + 7 HTTP) instead of `--port`. |
+| `--site-preflight` | | `true` | Run a DNS → TCP → TLS pre-flight check for each domain target before main probes. Skips the target if preflight fails; backs off on socket exhaustion. |
 
-If none of `--ips`, `--input-file`, or `--fastly-ranges` is provided, cf-knife fetches official Cloudflare IP ranges automatically.
+If none of `--ips`, `--input-file`, `--domain-file`, or `--fastly-ranges` is provided, cf-knife fetches official Cloudflare IP ranges automatically.
 
 ### Probe Flags
 
@@ -663,6 +667,73 @@ Combined workflow (matrix + sampling + fragment) in one run:
   --sample 50 \
   --http-fragment \
   -o matrix-scan.txt
+```
+
+### 20. Domain-based scan (`--domain-file`)
+
+Create a `domains.txt` file — one hostname per line; optional `label|host` prefix:
+
+```
+# plain hostnames
+example.com
+myapp.workers.dev
+
+# optional label prefix
+vpn-node | cf-node.example.com
+
+# full URLs work too
+https://another.site.dev
+```
+
+Scan each domain on port 443 (DNS → dial resolved IP, SNI = hostname):
+
+```bash
+./cf-knife scan \
+  --domain-file domains.txt \
+  -p 443 \
+  --mode full \
+  -o domain-scan.txt
+```
+
+```powershell
+.\cf-knife.exe scan `
+  --domain-file domains.txt `
+  -p 443 `
+  --mode full `
+  -o domain-scan.txt
+```
+
+Expand every domain across **all 13 Cloudflare edge ports** in one pass:
+
+```bash
+./cf-knife scan \
+  --domain-file domains.txt \
+  --cf-all-ports \
+  --timing 3 \
+  -o domain-all-ports.txt
+```
+
+Disable pre-flight checks (faster but skips DNS/TCP/TLS validation upfront):
+
+```bash
+./cf-knife scan \
+  --domain-file domains.txt \
+  -p 443 \
+  --site-preflight=false \
+  -o domain-no-preflight.txt
+```
+
+Domain scan with DPI analysis and certificate check:
+
+```bash
+./cf-knife scan \
+  --domain-file domains.txt \
+  --cf-all-ports \
+  --dpi \
+  --cert-check \
+  --script cloudflare \
+  --output-format csv \
+  -o domain-dpi-audit.csv
 ```
 
 ---
