@@ -260,16 +260,7 @@ func probeTLS(ctx context.Context, addr, sni string, timeout time.Duration) (*tl
 }
 
 func probeHTTP(ctx context.Context, addr, sni string, timeout time.Duration, httpURL string) (http.Header, error) {
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{Timeout: timeout}).DialContext(ctx, network, addr)
-		},
-		TLSClientConfig: &tls.Config{
-			ServerName:         sni,
-			InsecureSkipVerify: true,
-		},
-		DisableKeepAlives: true,
-	}
+	transport := NewAntiCrashHTTPTransport(addr, sni, timeout)
 	defer transport.CloseIdleConnections()
 
 	client := &http.Client{Transport: transport, Timeout: timeout}
@@ -378,6 +369,9 @@ func retry(ctx context.Context, n int, fn func() error) error {
 		if err = fn(); err == nil {
 			return nil
 		}
+		if IsSocketExhaustion(err) && i < n {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 	return err
 }
@@ -407,6 +401,9 @@ func retryVal[T any](ctx context.Context, n int, fn func() (T, error)) (T, error
 		val, err = fn()
 		if err == nil {
 			return val, nil
+		}
+		if IsSocketExhaustion(err) && i < n {
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 	return val, err

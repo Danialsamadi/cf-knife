@@ -165,16 +165,7 @@ func ProbeSNIFronting(ctx context.Context, addr string, snis []string, timeout t
 }
 
 func testSNI(ctx context.Context, addr, sni string, timeout time.Duration) (time.Duration, bool) {
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{Timeout: timeout}).DialContext(ctx, network, addr)
-		},
-		TLSClientConfig: &tls.Config{
-			ServerName:         sni,
-			InsecureSkipVerify: true,
-		},
-		DisableKeepAlives: true,
-	}
+	transport := NewAntiCrashHTTPTransport(addr, sni, timeout)
 	defer transport.CloseIdleConnections()
 
 	client := &http.Client{Transport: transport, Timeout: timeout}
