@@ -354,6 +354,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("  %d clean results saved to %s\n", len(clean), outPath)
 
+	// Write per-domain reachable + full-log reports when scanning in domain mode.
+	if cfg.DomainFile != "" {
+		if rErr := output.WriteDomainReports(clean, sc.Results, outPath, elapsed); rErr != nil {
+			fmt.Printf("  warning: could not write domain reports: %v\n", rErr)
+		}
+	}
+
 	// Persist successful domain scan results to cache for the next run.
 	if cfg.DomainFile != "" && cfg.DomainCachePath != "" && !interrupted {
 		if cacheErr := scanner.SaveDomainCache(cfg.DomainCachePath, clean); cacheErr != nil {
