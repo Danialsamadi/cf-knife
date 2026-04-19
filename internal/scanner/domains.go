@@ -49,6 +49,7 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 	}
 
 	var out []Target
+	var skipped int
 	if opt.CFAllPorts {
 		seen := make(map[string]struct{})
 		for _, e := range entries {
@@ -58,7 +59,8 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 			seen[e.host] = struct{}{}
 			ip, err := resolveHost(ctx, e.host, opt.IPv4Only, opt.IPv6Only)
 			if err != nil {
-				return nil, fmt.Errorf("resolve %q: %w", e.host, err)
+				skipped++
+				continue // skip unresolvable hosts rather than aborting
 			}
 			lbl := e.label
 			if lbl == "" {
@@ -89,7 +91,8 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 		for _, e := range entries {
 			ip, err := resolveHost(ctx, e.host, opt.IPv4Only, opt.IPv6Only)
 			if err != nil {
-				return nil, fmt.Errorf("resolve %q: %w", e.host, err)
+				skipped++
+				continue // skip unresolvable hosts rather than aborting
 			}
 			lbl := e.label
 			if lbl == "" {
@@ -107,6 +110,9 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 				})
 			}
 		}
+	}
+	if skipped > 0 {
+		fmt.Fprintf(os.Stderr, "  warning: skipped %d domain(s) that could not be resolved\n", skipped)
 	}
 
 	if opt.Shuffle {
