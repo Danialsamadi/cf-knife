@@ -92,6 +92,7 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 
 	workIP := t.IP
 	addr := net.JoinHostPort(workIP, t.Port)
+	httpFallback := false // set when HTTPS preflight fails but HTTP on port 80 succeeds
 	if pc.SitePreflight && t.Hostname != "" {
 		pn, err := strconv.Atoi(t.Port)
 		if err != nil {
@@ -107,17 +108,37 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		pr := PreFlightLayerCheck(ctx, t.Hostname, pn, sc, layerTimeout)
 		if pr.Status == "FATAL_ERR" {
 			time.Sleep(500 * time.Millisecond)
-		}
-		if pr.Status != "PASSED" {
-			res.Error = "preflight: " + pr.Status
+			res.Error = "preflight: FATAL_ERR"
 			res.Latency = time.Since(start)
 			return res
 		}
-		if pr.ResolvedIP != "" {
-			workIP = pr.ResolvedIP
-			res.IP = workIP
+		if pr.Status != "PASSED" {
+			// If the original port was HTTPS, try falling back to HTTP on port 80.
+			if sc == "https" {
+				pr2 := PreFlightLayerCheck(ctx, t.Hostname, 80, "http", layerTimeout)
+				if pr2.Status == "PASSED" {
+					workIP = pr2.ResolvedIP
+					res.IP = workIP
+					res.Port = "80"
+					addr = net.JoinHostPort(workIP, "80")
+					httpFallback = true
+				} else {
+					res.Error = "preflight: " + pr.Status + " (fallback: " + pr2.Status + ")"
+					res.Latency = time.Since(start)
+					return res
+				}
+			} else {
+				res.Error = "preflight: " + pr.Status
+				res.Latency = time.Since(start)
+				return res
+			}
+		} else {
+			if pr.ResolvedIP != "" {
+				workIP = pr.ResolvedIP
+				res.IP = workIP
+			}
+			addr = net.JoinHostPort(workIP, t.Port)
 		}
-		addr = net.JoinHostPort(workIP, t.Port)
 	}
 
 	// TCP — dispatch based on scan type
@@ -156,7 +177,7 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		return res
 	}
 
-	isTLSPort := t.Port != "80"
+	isTLSPort := t.Port != "80" && !httpFallback
 
 	// TLS
 	var tlsConn *tls.Conn
@@ -204,18 +225,24 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		}
 	}
 
+	// When falling back to HTTP, use an http:// URL instead of https://.
+	effectiveURL := pc.HTTPURL
+	if httpFallback {
+		effectiveURL = strings.Replace(effectiveURL, "https://", "http://", 1)
+	}
+
 	// HTTP/1.1
-	if pc.ShouldHTTP() && isTLSPort {
+	if pc.ShouldHTTP() && (isTLSPort || httpFallback) {
 		var hdrs http.Header
 		var status int
 		var httpErr error
 		if pc.HTTPFragment {
 			hdrs, httpErr = retryVal(ctx, pc.Retries, func() (http.Header, error) {
-				return probeHTTPFragmented(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
+				return probeHTTPFragmented(ctx, addr, sni, pc.Timeout, effectiveURL)
 			})
 		} else {
 			hdrs, status, httpErr = retryVal3(ctx, pc.Retries, func() (http.Header, int, error) {
-				return probeHTTP(ctx, addr, sni, pc.Timeout, pc.HTTPURL, method, extraHeaders)
+				return probeHTTP(ctx, addr, sni, pc.Timeout, effectiveURL, method, extraHeaders)
 			})
 		}
 		if httpErr != nil {
