@@ -10,7 +10,13 @@ cf-knife probes IP addresses across multiple ports using a layered approach: TCP
 
 ### Core Features
 
-- **Domain-based scanning**: Feed a list of hostnames (`--domain-file`); each is resolved via DNS and dialed by IP with SNI/Host = original hostname — DPI-bypass semantics without touching raw IPs
+- **Domain-based scanning**: Feed a list of hostnames (`--domain-file`); each is resolved via DNS and dialed by IP with SNI/Host = original hostname — DPI-bypass semantics without touching raw IPs. Supports bare hostnames, full URLs, `label | host` prefixes, and CIDR blocks
+- **HTTPS → HTTP fallback**: When preflight fails on an HTTPS port, automatically retries on port 80 with HTTP — keeps domain targets alive even under partial censorship
+- **Browser-like probes**: Domain-mode scans use HTTP `GET` (not `HEAD`) and send real `User-Agent`, `Accept`, `Accept-Language`, `Accept-Encoding` headers for accurate server behavior
+- **HTTP status code capture**: Actual HTTP response code (200, 301, 403…) stored in results and included in all output formats
+- **Label field**: `label | host` lines in domain files carry the label through to results and all output files
+- **Domain scan cache** (`--domain-cache`): Successful results are saved after each run; on the next run, cached targets are loaded first for faster re-checks
+- **Domain reports**: After every domain-mode scan, two report files are written automatically — `reachable-*.txt` (OPEN results sorted by latency) and `full_log-*.txt` (all targets with OPEN/DEAD tags)
 - **Multi-CDN support**: Cloudflare and Fastly edge fingerprinting with auto-fetched IP ranges
 - **Layered probes**: TCP, TLS, HTTP/1.1 (labeled HTTPS), HTTP/2, HTTP/3 (QUIC) -- run any combination per target
 - **Multi-SNI matrix scan**: Comma-separated `--sni` hostnames expand into separate targets (each IP×port is probed once per SNI)
@@ -181,9 +187,10 @@ cf-knife has one subcommand: `scan`.
 | `--shuffle` | | `false` | Randomize target order before scanning. |
 | `--sample` | | `0` | Randomly sample up to *N* IPs per CIDR subnet (`0` = expand every address in range). |
 | `--fastly-ranges` | | `false` | Use Fastly edge IP ranges instead of Cloudflare (fetched from `api.fastly.com`). |
-| `--domain-file` | | _(none)_ | Path to a file of hostnames to scan. Each host is resolved via DNS; probes dial the resolved IP with SNI and `Host` set to the original hostname (DPI-bypass). Mutually exclusive with `--ips`, `--input-file`, `--fastly-ranges`, `--warp`. |
+| `--domain-file` | | _(none)_ | Path to a file of hostnames to scan. Supports bare hostnames, `https://` / `http://` URLs, `label \| host` prefixes, and CIDR blocks (e.g. `104.18.2.0/24`). Each host is resolved via DNS; probes dial the resolved IP with SNI and `Host` set to the original hostname (DPI-bypass). Mutually exclusive with `--ips`, `--input-file`, `--fastly-ranges`, `--warp`. |
 | `--cf-all-ports` | | `false` | When using `--domain-file`, expand each hostname across all 13 Cloudflare edge ports (6 HTTPS + 7 HTTP) instead of `--port`. |
-| `--site-preflight` | | `true` | Run a DNS → TCP → TLS pre-flight check for each domain target before main probes. Skips the target if preflight fails; backs off on socket exhaustion. |
+| `--site-preflight` | | `true` | Run a DNS → TCP → TLS pre-flight check for each domain target before main probes. If the HTTPS preflight fails, automatically retries on port 80 with HTTP (anti-censorship fallback). Backs off 500 ms on socket exhaustion. |
+| `--domain-cache` | | `domain-cache.txt` | Cache file for domain scan results. Successful targets are saved after each run; on the next run, cached hosts are loaded first (deduplicated with the main list). |
 
 If none of `--ips`, `--input-file`, `--domain-file`, or `--fastly-ranges` is provided, cf-knife fetches official Cloudflare IP ranges automatically.
 
@@ -559,10 +566,13 @@ Each result is a JSON object with all probe fields:
 CSV header includes all fields:
 
 ```
-ip,port,latency_ms,source_range,tcp,tls,https,http2,http3,scan_type,server,tls_version,
-tls_cipher,alpn,cf_ray,service,ping_ms,jitter_ms,download_mbps,upload_mbps,
-best_fragment,sni_front,cert_issuer,cert_subject,cert_expiry,cert_mitm,error
+ip,port,sni,label,latency_ms,http_status,source_range,tcp,tls,https,http2,http3,
+scan_type,server,tls_version,tls_cipher,alpn,cf_ray,service,ping_ms,jitter_ms,
+download_mbps,upload_mbps,best_fragment,sni_front,cert_issuer,cert_subject,cert_expiry,
+cert_mitm,error
 ```
+
+`label` and `http_status` are populated for domain-mode scans.
 
 ### 15. Save and reuse configuration
 
@@ -671,21 +681,23 @@ Combined workflow (matrix + sampling + fragment) in one run:
 
 ### 20. Domain-based scan (`--domain-file`)
 
-Create a `domains.txt` file — one hostname per line; optional `label|host` prefix:
+Create a `domains.txt` file — mix of formats all supported in one file:
 
 ```
 # plain hostnames
 example.com
 myapp.workers.dev
 
-# optional label prefix
+# optional label prefix (label | host)
 vpn-node | cf-node.example.com
+my-app   | https://another.site.dev
 
-# full URLs work too
-https://another.site.dev
+# CIDR blocks expand to individual IP targets
+104.18.2.0/24
+labeled-range | 104.18.4.0/30
 ```
 
-Scan each domain on port 443 (DNS → dial resolved IP, SNI = hostname):
+**Basic domain scan** — DNS → dial resolved IP, SNI = hostname:
 
 ```bash
 ./cf-knife scan \
@@ -703,7 +715,12 @@ Scan each domain on port 443 (DNS → dial resolved IP, SNI = hostname):
   -o domain-scan.txt
 ```
 
-Expand every domain across **all 13 Cloudflare edge ports** in one pass:
+After the scan, three output files are written automatically:
+- `domain-scan-TIMESTAMP.txt` — main results with label and http_status fields
+- `reachable-TIMESTAMP.txt` — OPEN results sorted by latency
+- `full_log-TIMESTAMP.txt` — all targets with OPEN/DEAD tags
+
+**All 13 Cloudflare edge ports** in one pass:
 
 ```bash
 ./cf-knife scan \
@@ -713,7 +730,32 @@ Expand every domain across **all 13 Cloudflare edge ports** in one pass:
   -o domain-all-ports.txt
 ```
 
-Disable pre-flight checks (faster but skips DNS/TCP/TLS validation upfront):
+**With result cache** — successful targets saved after first run; loaded first on second run:
+
+```bash
+# First run — populates domain-cache.txt
+./cf-knife scan \
+  --domain-file domains.txt \
+  -p 443 \
+  --domain-cache domain-cache.txt \
+  -o domain-scan.txt
+
+# Subsequent runs — cached hosts checked first
+./cf-knife scan \
+  --domain-file domains.txt \
+  -p 443 \
+  --domain-cache domain-cache.txt \
+  -o domain-scan.txt
+```
+
+**HTTPS → HTTP fallback** — enabled by default; no flag needed. If a domain fails HTTPS preflight, cf-knife automatically retries on port 80 with HTTP:
+
+```
+  preflight: TLS_FAILED → retrying on port 80 with http...
+  [PASS] example.com resolved to 104.18.1.1 via HTTP fallback
+```
+
+**Disable pre-flight** (faster, skips DNS/TCP/TLS validation):
 
 ```bash
 ./cf-knife scan \
@@ -723,7 +765,7 @@ Disable pre-flight checks (faster but skips DNS/TCP/TLS validation upfront):
   -o domain-no-preflight.txt
 ```
 
-Domain scan with DPI analysis and certificate check:
+**Full domain audit** — DPI analysis, certificate check, CSV output:
 
 ```bash
 ./cf-knife scan \
@@ -732,8 +774,21 @@ Domain scan with DPI analysis and certificate check:
   --dpi \
   --cert-check \
   --script cloudflare \
+  --domain-cache domain-cache.txt \
   --output-format csv \
-  -o domain-dpi-audit.csv
+  -o domain-audit.csv
+```
+
+```powershell
+.\cf-knife.exe scan `
+  --domain-file domains.txt `
+  --cf-all-ports `
+  --dpi `
+  --cert-check `
+  --script cloudflare `
+  --domain-cache domain-cache.txt `
+  --output-format csv `
+  -o domain-audit.csv
 ```
 
 ---
@@ -745,9 +800,41 @@ Domain scan with DPI analysis and certificate check:
 Each line contains all available data for a target:
 
 ```
-1.0.0.113:443 | latency=33ms | range=1.0.0.0/24 | tcp=ok tls=ok https=ok http2=ok http3=ok | service=cloudflare/LAX
-1.0.0.54:443  | latency=45ms | range=1.0.0.0/24 | tcp=ok tls=ok https=ok http2=ok http3=fail | service=cloudflare/SIN | ping=12.3ms jitter=2.1ms | dl=45.67Mbps ul=12.34Mbps | frag=100 | sni_front=discord.com | cert_issuer=DigiCert Inc
-1.0.0.200:443 | latency=89ms | range=1.0.0.0/24 | tcp=ok tls=ok https=fail http2=fail http3=fail | service=- | cert_issuer=Unknown CA | MITM_DETECTED
+1.0.0.113:443 | sni=www.cloudflare.com | latency=33ms | range=1.0.0.0/24 | tcp=ok tls=ok https=ok http2=ok http3=ok | service=cloudflare/LAX | http_status=200
+example.com:443 | sni=example.com | latency=45ms | range=domain | tcp=ok tls=ok https=ok http2=ok http3=fail | service=cloudflare/SIN | label=my-site | http_status=200
+1.0.0.200:443 | sni=- | latency=89ms | range=1.0.0.0/24 | tcp=ok tls=ok https=fail http2=fail http3=fail | service=- | cert_issuer=Unknown CA | MITM_DETECTED
+```
+
+Domain-mode lines include `label=` and `http_status=` when available.
+
+### Domain reports (domain-mode only)
+
+When scanning with `--domain-file`, two extra files are written automatically alongside the main output:
+
+**`reachable-TIMESTAMP.txt`** — OPEN results sorted by latency:
+
+```
+Reachability Report — OPEN SITES
+Generated        : 2026-04-19 14:30:00
+Total tested     : 120 / 500
+Open (reachable) : 45
+Closed / Dead    : 75
+==========================================================================================
+#     Latency   HTTP  IP : Port               Label                          Hostname
+------------------------------------------------------------------------------------------
+1      142ms    200   104.18.1.1:443          my-app                         example.com
+2      178ms    200   104.18.2.5:443          vpn-node                       cf-node.example.com
+...
+CLOSED / UNREACHABLE
+  dead-site                      :0                     [DNS_FAILED]
+```
+
+**`full_log-TIMESTAMP.txt`** — all results with OPEN/DEAD tags, sorted by label:
+
+```
+Tag     Latency  HTTP/Err         IP : Port               Label                          Hostname
+OPEN     142ms   200              104.18.1.1:443          my-app                         example.com
+DEAD       0ms   DNS_FAILED       :0                      dead-site                      dead-site.io
 ```
 
 ### Clean list (clean_list.txt)
