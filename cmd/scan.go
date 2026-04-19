@@ -74,6 +74,10 @@ func init() {
 	f.Bool("smart-retry", false, "auto-relax thresholds if strict settings find nothing")
 	f.Bool("resume", false, "resume the last interrupted scan from SQLite queue")
 	f.String("db", "cf-knife.db", "path to SQLite database for persistent queue")
+
+	f.String("domain-file", "", "file with hostnames/domains to scan (DNS->IP DPI bypass)")
+	f.Bool("cf-all-ports", false, "scan all Cloudflare HTTP/HTTPS edge ports for domains")
+	f.Bool("site-preflight", true, "run DNS+TCP(+TLS) preflight checks for domain targets")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -115,14 +119,33 @@ func runScan(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	// Load targets.
+	var targets []scanner.Target
 	if cfg.Verbose {
 		fmt.Println("loading targets...")
 	}
-	targets, err := scanner.LoadTargets(ctx, cfg.IPs, cfg.InputFile, cfg.Ports,
-		cfg.IPv4Only, cfg.IPv6Only, cfg.Shuffle, cfg.FastlyRanges, cfg.SamplePerSubnet)
-	if err != nil {
-		return err
+	if cfg.DomainFile != "" {
+		if cfg.InputFile != "" || cfg.IPs != "" || cfg.FastlyRanges || cfg.WARPScan {
+			return fmt.Errorf("--domain-file conflicts with --input-file, --ips, --fastly-ranges, or --warp")
+		}
+		opt := scanner.DomainLoadOptions{
+			Ports:      cfg.Ports,
+			CFAllPorts: cfg.CFAllPorts,
+			Shuffle:    cfg.Shuffle,
+			IPv4Only:   cfg.IPv4Only,
+			IPv6Only:   cfg.IPv6Only,
+		}
+		targets, err = scanner.LoadDomainTargets(ctx, cfg.DomainFile, opt)
+		if err != nil {
+			return err
+		}
+	} else {
+		targets, err = scanner.LoadTargets(ctx, cfg.IPs, cfg.InputFile, cfg.Ports,
+			cfg.IPv4Only, cfg.IPv6Only, cfg.Shuffle, cfg.FastlyRanges, cfg.SamplePerSubnet)
+		if err != nil {
+			return err
+		}
 	}
+
 	// Multi-SNI expansion: when multiple SNIs are given, create one target per
 	// IP+port+SNI combination so each SNI is tested independently.
 	if len(cfg.SNIs) > 1 {
@@ -134,6 +157,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 					Port:        t.Port,
 					SourceRange: t.SourceRange,
 					SNI:         sni,
+					Hostname:    t.Hostname,
 				})
 			}
 		}
@@ -176,6 +200,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		FragmentSizes: fragSizes,
 		CertCheck:     cfg.CertCheck,
 		HTTPFragment:  cfg.HTTPFragment,
+		SitePreflight: cfg.SitePreflight,
 	}
 
 	sc := &scanner.Scanner{
@@ -340,6 +365,7 @@ func filterResults(results []scanner.ProbeResult, maxLatency time.Duration) (cle
 				Port:        r.Port,
 				SourceRange: r.SourceRange,
 				SNI:         r.SNI,
+				Hostname:    r.Hostname,
 			})
 		}
 	}

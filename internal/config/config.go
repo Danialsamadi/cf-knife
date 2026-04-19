@@ -57,6 +57,10 @@ type Config struct {
 	SmartRetry   bool   `json:"smart_retry" mapstructure:"smart-retry"`
 	Resume       bool   `json:"resume" mapstructure:"resume"`
 	DBPath       string `json:"db_path" mapstructure:"db"`
+
+	DomainFile    string `json:"domain_file" mapstructure:"domain-file"`
+	CFAllPorts    bool   `json:"cf_all_ports" mapstructure:"cf-all-ports"`
+	SitePreflight bool   `json:"site_preflight" mapstructure:"site-preflight"`
 }
 
 // Load reads a Config from Viper, which should already have flag bindings and
@@ -121,6 +125,10 @@ func Load(v *viper.Viper) (*Config, error) {
 		SmartRetry:   v.GetBool("smart-retry"),
 		Resume:       v.GetBool("resume"),
 		DBPath:       v.GetString("db"),
+
+		DomainFile:    v.GetString("domain-file"),
+		CFAllPorts:    v.GetBool("cf-all-ports"),
+		SitePreflight: v.GetBool("site-preflight"),
 	}
 
 	if err := cfg.Validate(); err != nil {
