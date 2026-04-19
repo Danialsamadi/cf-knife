@@ -53,3 +53,26 @@ func TestSchemeForPort(t *testing.T) {
 		t.Error("443")
 	}
 }
+
+func TestLoadDomainTargets_CIDR(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "d.txt")
+	// /30 has 4 addresses: network, 2 hosts, broadcast → expect 2 targets
+	if err := os.WriteFile(p, []byte("192.0.2.0/30\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	targets, err := LoadDomainTargets(ctx, p, DomainLoadOptions{Ports: []string{"443"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("got %d targets for /30, want 2", len(targets))
+	}
+	if targets[0].Hostname != "192.0.2.1" {
+		t.Errorf("first host = %q, want 192.0.2.1", targets[0].Hostname)
+	}
+	if targets[1].Hostname != "192.0.2.2" {
+		t.Errorf("second host = %q, want 192.0.2.2", targets[1].Hostname)
+	}
+}

@@ -138,6 +138,16 @@ func parseDomainFile(path string) ([]domainEntry, error) {
 		}
 		val = strings.Trim(val, "'\"")
 
+		// CIDR block (e.g. 104.18.2.0/24) — expand to individual IP entries.
+		if strings.Contains(val, "/") && !strings.HasPrefix(val, "http") {
+			ip, ipnet, err := net.ParseCIDR(val)
+			if err == nil {
+				expanded := expandCIDR(ip, ipnet, lbl)
+				out = append(out, expanded...)
+				continue
+			}
+		}
+
 		host, _ := parseHostScheme(val)
 		if host == "" {
 			continue
@@ -198,4 +208,37 @@ func resolveHost(ctx context.Context, host string, ipv4Only, ipv6Only bool) (str
 		}
 	}
 	return ips[0], nil
+}
+
+// expandCIDR converts a CIDR block into individual domainEntry values (one per host IP).
+// The network address and broadcast address are skipped.
+func expandCIDR(ip net.IP, ipnet *net.IPNet, lbl string) []domainEntry {
+	var out []domainEntry
+	cur := ip.Mask(ipnet.Mask)
+	for ; ipnet.Contains(cur); incIP(cur) {
+		ipStr := cur.String()
+		if ipStr == ipnet.IP.String() {
+			continue // skip network address
+		}
+		entryLbl := ipStr
+		if lbl != "" {
+			entryLbl = strings.TrimSpace(lbl + " " + ipStr)
+		}
+		out = append(out, domainEntry{label: entryLbl, host: ipStr})
+	}
+	// Remove broadcast (last appended entry).
+	if len(out) > 0 {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+// incIP increments an IP address in-place.
+func incIP(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
 }
