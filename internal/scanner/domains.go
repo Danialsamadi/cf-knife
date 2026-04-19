@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // CFHTTPSPorts and CFHTTPPorts are Cloudflare-proxied edge ports (HTTP vs HTTPS stacks).
@@ -48,27 +49,71 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 		return nil, fmt.Errorf("domain load: Ports required when CFAllPorts is false")
 	}
 
+	// Deduplicate entries by host before resolving.
+	seen := make(map[string]struct{})
+	unique := make([]domainEntry, 0, len(entries))
+	for _, e := range entries {
+		if _, ok := seen[e.host]; !ok {
+			seen[e.host] = struct{}{}
+			unique = append(unique, e)
+		}
+	}
+
+	// Resolve all hostnames concurrently to avoid multi-second serial DNS waits.
+	const dnsWorkers = 200
+	workers := dnsWorkers
+	if workers > len(unique) {
+		workers = len(unique)
+	}
+	fmt.Fprintf(os.Stderr, "  resolving %d domains (%d parallel)...\n", len(unique), workers)
+
+	type resolved struct {
+		entry domainEntry
+		ip    string
+	}
+	jobs := make(chan domainEntry, len(unique))
+	results := make(chan resolved, len(unique))
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for e := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				ip, err := resolveHost(ctx, e.host, opt.IPv4Only, opt.IPv6Only)
+				if err != nil {
+					results <- resolved{entry: e, ip: ""} // empty ip = skip
+				} else {
+					results <- resolved{entry: e, ip: ip}
+				}
+			}
+		}()
+	}
+	for _, e := range unique {
+		jobs <- e
+	}
+	close(jobs)
+	go func() { wg.Wait(); close(results) }()
+
 	var out []Target
 	var skipped int
-	if opt.CFAllPorts {
-		seen := make(map[string]struct{})
-		for _, e := range entries {
-			if _, ok := seen[e.host]; ok {
-				continue
-			}
-			seen[e.host] = struct{}{}
-			ip, err := resolveHost(ctx, e.host, opt.IPv4Only, opt.IPv6Only)
-			if err != nil {
-				skipped++
-				continue // skip unresolvable hosts rather than aborting
-			}
-			lbl := e.label
-			if lbl == "" {
-				lbl = e.host
-			}
+	for r := range results {
+		if r.ip == "" {
+			skipped++
+			continue
+		}
+		e := r.entry
+		lbl := e.label
+		if lbl == "" {
+			lbl = e.host
+		}
+		if opt.CFAllPorts {
 			for _, p := range CFHTTPSPorts {
 				out = append(out, Target{
-					IP:          ip,
+					IP:          r.ip,
 					Port:        strconv.Itoa(p),
 					SourceRange: "domain",
 					Hostname:    e.host,
@@ -78,7 +123,7 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 			}
 			for _, p := range CFHTTPPorts {
 				out = append(out, Target{
-					IP:          ip,
+					IP:          r.ip,
 					Port:        strconv.Itoa(p),
 					SourceRange: "domain",
 					Hostname:    e.host,
@@ -86,22 +131,11 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 					Label:       lbl,
 				})
 			}
-		}
-	} else {
-		for _, e := range entries {
-			ip, err := resolveHost(ctx, e.host, opt.IPv4Only, opt.IPv6Only)
-			if err != nil {
-				skipped++
-				continue // skip unresolvable hosts rather than aborting
-			}
-			lbl := e.label
-			if lbl == "" {
-				lbl = e.host
-			}
+		} else {
 			for _, ps := range opt.Ports {
 				ps = strings.TrimSpace(ps)
 				out = append(out, Target{
-					IP:          ip,
+					IP:          r.ip,
 					Port:        ps,
 					SourceRange: "domain",
 					Hostname:    e.host,
