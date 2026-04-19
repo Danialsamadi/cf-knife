@@ -58,9 +58,10 @@ type Config struct {
 	Resume       bool   `json:"resume" mapstructure:"resume"`
 	DBPath       string `json:"db_path" mapstructure:"db"`
 
-	DomainFile    string `json:"domain_file" mapstructure:"domain-file"`
-	CFAllPorts    bool   `json:"cf_all_ports" mapstructure:"cf-all-ports"`
-	SitePreflight bool   `json:"site_preflight" mapstructure:"site-preflight"`
+	DomainFile      string `json:"domain_file" mapstructure:"domain-file"`
+	CFAllPorts      bool   `json:"cf_all_ports" mapstructure:"cf-all-ports"`
+	SitePreflight   bool   `json:"site_preflight" mapstructure:"site-preflight"`
+	DomainCachePath string `json:"domain_cache_path" mapstructure:"domain-cache"`
 }
 
 // Load reads a Config from Viper, which should already have flag bindings and
@@ -126,9 +127,10 @@ func Load(v *viper.Viper) (*Config, error) {
 		Resume:       v.GetBool("resume"),
 		DBPath:       v.GetString("db"),
 
-		DomainFile:    v.GetString("domain-file"),
-		CFAllPorts:    v.GetBool("cf-all-ports"),
-		SitePreflight: v.GetBool("site-preflight"),
+		DomainFile:      v.GetString("domain-file"),
+		CFAllPorts:      v.GetBool("cf-all-ports"),
+		SitePreflight:   v.GetBool("site-preflight"),
+		DomainCachePath: v.GetString("domain-cache"),
 	}
 
 	if err := cfg.Validate(); err != nil {

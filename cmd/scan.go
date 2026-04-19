@@ -78,6 +78,7 @@ func init() {
 	f.String("domain-file", "", "file with hostnames/domains to scan (DNS->IP DPI bypass)")
 	f.Bool("cf-all-ports", false, "scan all Cloudflare HTTP/HTTPS edge ports for domains")
 	f.Bool("site-preflight", true, "run DNS+TCP(+TLS) preflight checks for domain targets")
+	f.String("domain-cache", "domain-cache.txt", "cache file for successful domain scan results")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -137,6 +138,17 @@ func runScan(cmd *cobra.Command, args []string) error {
 		targets, err = scanner.LoadDomainTargets(ctx, cfg.DomainFile, opt)
 		if err != nil {
 			return err
+		}
+		// Prepend cached results from the last run so they are prioritized.
+		if cfg.DomainCachePath != "" {
+			cached, cacheErr := scanner.LoadDomainCache(cfg.DomainCachePath)
+			if cacheErr != nil {
+				return fmt.Errorf("load domain cache: %w", cacheErr)
+			}
+			if len(cached) > 0 {
+				fmt.Printf("  loaded %d cached targets from %s\n", len(cached), cfg.DomainCachePath)
+				targets = scanner.DeduplicateDomainTargets(cached, targets)
+			}
 		}
 	} else {
 		targets, err = scanner.LoadTargets(ctx, cfg.IPs, cfg.InputFile, cfg.Ports,
@@ -341,6 +353,16 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("  %d clean results saved to %s\n", len(clean), outPath)
+
+	// Persist successful domain scan results to cache for the next run.
+	if cfg.DomainFile != "" && cfg.DomainCachePath != "" && !interrupted {
+		if cacheErr := scanner.SaveDomainCache(cfg.DomainCachePath, clean); cacheErr != nil {
+			fmt.Printf("  warning: could not save domain cache: %v\n", cacheErr)
+		} else {
+			fmt.Printf("  domain cache saved to %s\n", cfg.DomainCachePath)
+		}
+	}
+
 	return nil
 }
 
