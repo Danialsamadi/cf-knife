@@ -26,6 +26,7 @@ cf-knife probes IP addresses across multiple ports using a layered approach: TCP
 - **Performance metrics**: Real ping/jitter (ICMP or TCP-based) and download/upload speed testing
 - **DPI bypass analysis**: TLS ClientHello fragmentation and SNI fronting enumeration
 - **WARP endpoint scanner**: Dedicated WireGuard/UDP scanner for Cloudflare WARP endpoints
+- **DNS poison detection** (`--dns-check`): Compares system resolver answer against Cloudflare (`1.1.1.1`) and Google (`8.8.8.8`) DoH — dials by IP to bypass poisoning of the resolver itself, detects IP_MISMATCH and DNS_HIJACK
 - **TLS certificate validation**: Anti-MITM detection by inspecting the certificate chain
 - **Smart retry logic**: Automatically relaxes thresholds when strict settings yield zero results
 - **Persistent SQLite queue**: Scan state survives app restarts with `--resume`
@@ -242,6 +243,7 @@ If none of `--ips`, `--input-file`, `--domain-file`, or `--fastly-ranges` is pro
 | `--fragment-sizes` | `10,50,100,200,500` | Comma-separated fragment sizes (bytes) for DPI testing. |
 | `--http-fragment` | `false` | Use chunked HTTP requests (small writes with delays) instead of a normal HEAD for HTTP/HTTPS probes. |
 | `--cert-check` | `false` | Validate TLS certificates against known CDN issuers and flag MITM. |
+| `--dns-check` | `false` | Compare system DNS answer against Cloudflare+Google DoH (dialed by IP) to detect poisoning. Adds `dns=` field to every result. Only meaningful with `--domain-file`. |
 | `--smart-retry` | `false` | Auto-relax `max-latency` (2x) and `timeout` (1.5x) if no results pass filters. |
 | `--warp` | `false` | Scan for reachable Cloudflare WARP UDP endpoints. |
 | `--warp-port` | `2408` | UDP port for WARP probing. |
@@ -927,6 +929,56 @@ cat /tmp/out-*.json | python3 -m json.tool | head -40
   -p 443 --mode http \
   --site-preflight=false \
   -o /tmp/fast.txt
+```
+
+### 22. DNS poison detection (`--dns-check`)
+
+Compares your system resolver against Cloudflare DoH (`1.1.1.1`) and Google DoH (`8.8.8.8`), dialing both by IP to avoid poisoning of the resolver hostname itself.
+
+```bash
+echo "cloudflare.com" > /tmp/dns-test.txt
+./cf-knife scan \
+  --domain-file /tmp/dns-test.txt \
+  -p 443 --mode http \
+  --dns-check \
+  --site-preflight=false \
+  -o /tmp/dns-out.txt
+
+cat /tmp/dns-out-*.txt
+```
+
+The `dns=` field in every result line shows one of:
+
+| Value | Meaning |
+|-------|---------|
+| `dns=clean` | System IP matches DoH — no poisoning detected |
+| `dns=POISONED:IP_MISMATCH(sys=X real=Y)` | System returned a different IP than DoH |
+| `dns=POISONED:DNS_HIJACK(real=Y)` | System DNS fails but DoH resolves — DNS blocked/hijacked |
+| `dns=DOH_UNAVAILABLE` | Both DoH endpoints unreachable — result is inconclusive |
+
+**CSV output** — includes 4 extra columns: `dns_poisoned`, `dns_system_ip`, `dns_clean_ip`, `dns_poison_reason`:
+
+```bash
+./cf-knife scan \
+  --domain-file /tmp/dns-test.txt \
+  -p 443 --mode http \
+  --dns-check --site-preflight=false \
+  --output-format csv \
+  -o /tmp/dns-out.csv
+
+head -2 /tmp/dns-out-*.csv
+```
+
+**Combined with cert-check** — catches both DNS-level and TLS-level interception in one pass:
+
+```bash
+./cf-knife scan \
+  --domain-file domains.txt \
+  -p 443 --mode http \
+  --dns-check \
+  --cert-check \
+  --site-preflight=false \
+  -o /tmp/full-check.txt
 ```
 
 ---
