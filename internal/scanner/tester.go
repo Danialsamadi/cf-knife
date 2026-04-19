@@ -37,6 +37,7 @@ type ProbeConfig struct {
 	FragmentSizes []int
 	CertCheck     bool
 	HTTPFragment  bool
+	DNSCheck      bool
 
 	// SitePreflight runs DNS+TCP(+TLS for https ports) before main probes when Hostname is set.
 	SitePreflight bool
@@ -139,6 +140,15 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 			}
 			addr = net.JoinHostPort(workIP, t.Port)
 		}
+	}
+
+	// DNS poison detection — compare system resolver vs Cloudflare+Google DoH.
+	if pc.DNSCheck && t.Hostname != "" {
+		dr := CheckDNSPoisoning(ctx, t.Hostname, pc.Timeout)
+		res.DNSPoisoned = dr.Poisoned
+		res.DNSSystemIP = dr.SystemIP
+		res.DNSCleanIP = dr.CleanIP
+		res.DNSPoisonReason = dr.Reason
 	}
 
 	// TCP — dispatch based on scan type

@@ -79,6 +79,7 @@ func init() {
 	f.Bool("cf-all-ports", false, "scan all Cloudflare HTTP/HTTPS edge ports for domains")
 	f.Bool("site-preflight", true, "run DNS+TCP(+TLS) preflight checks for domain targets")
 	f.String("domain-cache", "domain-cache.txt", "cache file for successful domain scan results")
+	f.Bool("dns-check", false, "compare system DNS against Cloudflare+Google DoH to detect poisoning (domain-file only)")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -213,6 +214,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		CertCheck:     cfg.CertCheck,
 		HTTPFragment:  cfg.HTTPFragment,
 		SitePreflight: cfg.SitePreflight,
+		DNSCheck:      cfg.DNSCheck,
 	}
 
 	sc := &scanner.Scanner{

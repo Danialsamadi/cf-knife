@@ -62,6 +62,7 @@ type Config struct {
 	CFAllPorts      bool   `json:"cf_all_ports" mapstructure:"cf-all-ports"`
 	SitePreflight   bool   `json:"site_preflight" mapstructure:"site-preflight"`
 	DomainCachePath string `json:"domain_cache_path" mapstructure:"domain-cache"`
+	DNSCheck        bool   `json:"dns_check" mapstructure:"dns-check"`
 }
 
 // Load reads a Config from Viper, which should already have flag bindings and
@@ -131,6 +132,7 @@ func Load(v *viper.Viper) (*Config, error) {
 		CFAllPorts:      v.GetBool("cf-all-ports"),
 		SitePreflight:   v.GetBool("site-preflight"),
 		DomainCachePath: v.GetString("domain-cache"),
+		DNSCheck:        v.GetBool("dns-check"),
 	}
 
 	if err := cfg.Validate(); err != nil {

@@ -100,6 +100,18 @@ func writeTXT(results []scanner.ProbeResult, path string) error {
 		if r.CertMITM {
 			line += " | MITM_DETECTED"
 		}
+		if r.DNSSystemIP != "" {
+			switch r.DNSPoisonReason {
+			case "IP_MISMATCH":
+				line += fmt.Sprintf(" | dns=POISONED:IP_MISMATCH(sys=%s real=%s)", r.DNSSystemIP, r.DNSCleanIP)
+			case "DNS_HIJACK":
+				line += fmt.Sprintf(" | dns=POISONED:DNS_HIJACK(real=%s)", r.DNSCleanIP)
+			case "DOH_UNAVAILABLE":
+				line += " | dns=DOH_UNAVAILABLE"
+			default:
+				line += " | dns=clean"
+			}
+		}
 		fmt.Fprintln(f, line)
 	}
 	return nil
@@ -128,6 +140,7 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 		"ping_ms", "jitter_ms", "download_mbps", "upload_mbps",
 		"best_fragment", "sni_front",
 		"cert_issuer", "cert_subject", "cert_expiry", "cert_mitm",
+		"dns_poisoned", "dns_system_ip", "dns_clean_ip", "dns_poison_reason",
 		"error"}
 	if err := w.Write(header); err != nil {
 		return err
@@ -147,6 +160,7 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 			fmtFloat(r.DownloadMbps), fmtFloat(r.UploadMbps),
 			fmtInt(r.BestFragmentSize), r.SNIFront,
 			r.CertIssuer, r.CertSubject, r.CertExpiry, boolStr(r.CertMITM),
+			boolStr(r.DNSPoisoned), r.DNSSystemIP, r.DNSCleanIP, r.DNSPoisonReason,
 			r.Error,
 		}
 		if err := w.Write(row); err != nil {

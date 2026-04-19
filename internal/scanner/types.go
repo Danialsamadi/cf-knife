@@ -58,6 +58,12 @@ type ProbeResult struct {
 	CertExpiry  string `json:"cert_expiry,omitempty"`
 	CertMITM    bool   `json:"cert_mitm,omitempty"`
 
+	// DNS poison detection (--dns-check).
+	DNSPoisoned     bool   `json:"dns_poisoned,omitempty"`
+	DNSSystemIP     string `json:"dns_system_ip,omitempty"`
+	DNSCleanIP      string `json:"dns_clean_ip,omitempty"`
+	DNSPoisonReason string `json:"dns_poison_reason,omitempty"`
+
 	Error string `json:"error,omitempty"`
 }
 
