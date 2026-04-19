@@ -60,6 +60,10 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 			if err != nil {
 				return nil, fmt.Errorf("resolve %q: %w", e.host, err)
 			}
+			lbl := e.label
+			if lbl == "" {
+				lbl = e.host
+			}
 			for _, p := range CFHTTPSPorts {
 				out = append(out, Target{
 					IP:          ip,
@@ -67,6 +71,7 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 					SourceRange: "domain",
 					Hostname:    e.host,
 					SNI:         e.host,
+					Label:       lbl,
 				})
 			}
 			for _, p := range CFHTTPPorts {
@@ -76,6 +81,7 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 					SourceRange: "domain",
 					Hostname:    e.host,
 					SNI:         e.host,
+					Label:       lbl,
 				})
 			}
 		}
@@ -85,6 +91,10 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 			if err != nil {
 				return nil, fmt.Errorf("resolve %q: %w", e.host, err)
 			}
+			lbl := e.label
+			if lbl == "" {
+				lbl = e.host
+			}
 			for _, ps := range opt.Ports {
 				ps = strings.TrimSpace(ps)
 				out = append(out, Target{
@@ -93,6 +103,7 @@ func LoadDomainTargets(ctx context.Context, path string, opt DomainLoadOptions) 
 					SourceRange: "domain",
 					Hostname:    e.host,
 					SNI:         e.host,
+					Label:       lbl,
 				})
 			}
 		}

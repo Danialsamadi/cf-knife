@@ -122,7 +122,8 @@ func TestWriteCSV(t *testing.T) {
 	}
 
 	header := records[0]
-	if header[0] != "ip" || header[7] != "https" || header[9] != "http3" {
+	// ip(0) port(1) sni(2) label(3) latency_ms(4) http_status(5) source_range(6) tcp(7) tls(8) https(9) http2(10) http3(11)
+	if header[0] != "ip" || header[9] != "https" || header[11] != "http3" {
 		t.Errorf("unexpected header: %v", header)
 	}
 

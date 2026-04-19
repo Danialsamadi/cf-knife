@@ -83,6 +83,7 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		Port:        t.Port,
 		SNI:         sni,
 		Hostname:    t.Hostname,
+		Label:       t.Label,
 		SourceRange: t.SourceRange,
 		ScanType:    string(pc.ScanType),
 	}
@@ -188,49 +189,72 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		}
 	}
 
+	// For domain-based targets, use GET + browser-like headers to mimic real traffic.
+	isDomainTarget := t.Hostname != ""
+	method := http.MethodHead
+	var extraHeaders map[string]string
+	if isDomainTarget {
+		method = http.MethodGet
+		extraHeaders = map[string]string{
+			"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+			"Accept":          "text/html,application/xhtml+xml,*/*;q=0.9",
+			"Accept-Language": "en-US,en;q=0.5",
+			"Accept-Encoding": "gzip, deflate",
+			"Connection":      "close",
+		}
+	}
+
 	// HTTP/1.1
 	if pc.ShouldHTTP() && isTLSPort {
 		var hdrs http.Header
+		var status int
 		var httpErr error
 		if pc.HTTPFragment {
 			hdrs, httpErr = retryVal(ctx, pc.Retries, func() (http.Header, error) {
 				return probeHTTPFragmented(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
 			})
 		} else {
-			hdrs, httpErr = retryVal(ctx, pc.Retries, func() (http.Header, error) {
-				return probeHTTP(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
+			hdrs, status, httpErr = retryVal3(ctx, pc.Retries, func() (http.Header, int, error) {
+				return probeHTTP(ctx, addr, sni, pc.Timeout, pc.HTTPURL, method, extraHeaders)
 			})
 		}
 		if httpErr != nil {
 			res.Error = fmt.Sprintf("http: %v", httpErr)
 		} else {
 			res.HTTPSuccess = true
+			res.HTTPStatus = status
 			extractHeaders(&res, hdrs)
 		}
 	}
 
 	// HTTP/2
 	if pc.ShouldHTTP2() && isTLSPort {
-		hdrs, err := retryVal(ctx, pc.Retries, func() (http.Header, error) {
-			return probeHTTP2(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
+		hdrs, status, err := retryVal3(ctx, pc.Retries, func() (http.Header, int, error) {
+			return probeHTTP2(ctx, addr, sni, pc.Timeout, pc.HTTPURL, method, extraHeaders)
 		})
 		if err != nil {
 			res.Error = fmt.Sprintf("http2: %v", err)
 		} else {
 			res.HTTP2Success = true
+			if res.HTTPStatus == 0 {
+				res.HTTPStatus = status
+			}
 			extractHeaders(&res, hdrs)
 		}
 	}
 
 	// HTTP/3 (QUIC over UDP)
 	if pc.ShouldHTTP3() && isTLSPort {
-		hdrs, err := retryVal(ctx, pc.Retries, func() (http.Header, error) {
-			return probeHTTP3(ctx, addr, sni, pc.Timeout, pc.HTTPURL)
+		hdrs, status, err := retryVal3(ctx, pc.Retries, func() (http.Header, int, error) {
+			return probeHTTP3(ctx, addr, sni, pc.Timeout, pc.HTTPURL, method, extraHeaders)
 		})
 		if err != nil {
 			res.Error = fmt.Sprintf("http3: %v", err)
 		} else {
 			res.HTTP3Success = true
+			if res.HTTPStatus == 0 {
+				res.HTTPStatus = status
+			}
 			extractHeaders(&res, hdrs)
 		}
 	}
@@ -296,26 +320,29 @@ func probeTLS(ctx context.Context, addr, sni string, timeout time.Duration) (*tl
 	return tlsConn, nil
 }
 
-func probeHTTP(ctx context.Context, addr, sni string, timeout time.Duration, httpURL string) (http.Header, error) {
+func probeHTTP(ctx context.Context, addr, sni string, timeout time.Duration, httpURL, method string, extraHeaders map[string]string) (http.Header, int, error) {
 	transport := NewAntiCrashHTTPTransport(addr, sni, timeout)
 	defer transport.CloseIdleConnections()
 
 	client := &http.Client{Transport: transport, Timeout: timeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, httpURL, nil)
+	req, err := http.NewRequestWithContext(ctx, method, httpURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Host = sni
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	return resp.Header, nil
+	return resp.Header, resp.StatusCode, nil
 }
 
-func probeHTTP2(ctx context.Context, addr, sni string, timeout time.Duration, httpURL string) (http.Header, error) {
+func probeHTTP2(ctx context.Context, addr, sni string, timeout time.Duration, httpURL, method string, extraHeaders map[string]string) (http.Header, int, error) {
 	transport := &http2.Transport{
 		DialTLSContext: func(ctx context.Context, network, _ string, cfg *tls.Config) (net.Conn, error) {
 			d := net.Dialer{Timeout: timeout}
@@ -340,21 +367,24 @@ func probeHTTP2(ctx context.Context, addr, sni string, timeout time.Duration, ht
 	defer transport.CloseIdleConnections()
 
 	client := &http.Client{Transport: transport, Timeout: timeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, httpURL, nil)
+	req, err := http.NewRequestWithContext(ctx, method, httpURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Host = sni
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	return resp.Header, nil
+	return resp.Header, resp.StatusCode, nil
 }
 
-func probeHTTP3(ctx context.Context, addr, sni string, timeout time.Duration, httpURL string) (http.Header, error) {
+func probeHTTP3(ctx context.Context, addr, sni string, timeout time.Duration, httpURL, method string, extraHeaders map[string]string) (http.Header, int, error) {
 	roundTripper := &http3.Transport{
 		TLSClientConfig: &tls.Config{
 			ServerName:         sni,
@@ -369,18 +399,21 @@ func probeHTTP3(ctx context.Context, addr, sni string, timeout time.Duration, ht
 	defer roundTripper.Close()
 
 	client := &http.Client{Transport: roundTripper, Timeout: timeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, httpURL, nil)
+	req, err := http.NewRequestWithContext(ctx, method, httpURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Host = sni
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	return resp.Header, nil
+	return resp.Header, resp.StatusCode, nil
 }
 
 // --- helpers ---
@@ -444,6 +477,25 @@ func retryVal[T any](ctx context.Context, n int, fn func() (T, error)) (T, error
 		}
 	}
 	return val, err
+}
+
+func retryVal3[T, U any](ctx context.Context, n int, fn func() (T, U, error)) (T, U, error) {
+	var v1 T
+	var v2 U
+	var err error
+	for i := 0; i <= n; i++ {
+		if ctx.Err() != nil {
+			return v1, v2, ctx.Err()
+		}
+		v1, v2, err = fn()
+		if err == nil {
+			return v1, v2, nil
+		}
+		if IsSocketExhaustion(err) && i < n {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	return v1, v2, err
 }
 
 func tlsVersionName(v uint16) string {

@@ -11,6 +11,8 @@ type Target struct {
 	// Hostname is the original hostname when targets come from a domain list
 	// (DNS → IP dial with SNI/Host = hostname). Empty for IP-only scans.
 	Hostname string
+	// Label is an optional human-readable identifier from domain list files ("label | host").
+	Label string
 }
 
 // ProbeResult holds the outcome of all enabled probes for one target.
@@ -19,6 +21,7 @@ type ProbeResult struct {
 	Port        string        `json:"port"`
 	SNI         string        `json:"sni,omitempty"`
 	Hostname    string        `json:"hostname,omitempty"`
+	Label       string        `json:"label,omitempty"`
 	SourceRange string        `json:"source_range"`
 	Latency     time.Duration `json:"latency_ms"`
 
@@ -27,6 +30,7 @@ type ProbeResult struct {
 	HTTPSuccess  bool `json:"http_success"`
 	HTTP2Success bool `json:"http2_success"`
 	HTTP3Success bool `json:"http3_success"`
+	HTTPStatus   int  `json:"http_status,omitempty"`
 
 	ScanType string `json:"scan_type"`
 

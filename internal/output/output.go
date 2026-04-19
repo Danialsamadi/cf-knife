@@ -76,6 +76,12 @@ func writeTXT(results []scanner.ProbeResult, path string) error {
 			boolOK(r.HTTPSuccess), boolOK(r.HTTP2Success), boolOK(r.HTTP3Success),
 			nvl(r.ServiceName, "-"),
 		)
+		if r.Label != "" {
+			line += fmt.Sprintf(" | label=%s", r.Label)
+		}
+		if r.HTTPStatus != 0 {
+			line += fmt.Sprintf(" | http_status=%d", r.HTTPStatus)
+		}
 		if r.PingMs > 0 {
 			line += fmt.Sprintf(" | ping=%.1fms jitter=%.1fms", r.PingMs, r.JitterMs)
 		}
@@ -117,7 +123,7 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
-	header := []string{"ip", "port", "sni", "latency_ms", "source_range", "tcp", "tls", "https", "http2", "http3",
+	header := []string{"ip", "port", "sni", "label", "latency_ms", "http_status", "source_range", "tcp", "tls", "https", "http2", "http3",
 		"scan_type", "server", "tls_version", "tls_cipher", "alpn", "cf_ray", "service",
 		"ping_ms", "jitter_ms", "download_mbps", "upload_mbps",
 		"best_fragment", "sni_front",
@@ -129,8 +135,9 @@ func writeCSV(results []scanner.ProbeResult, path string) error {
 
 	for _, r := range results {
 		row := []string{
-			r.IP, r.Port, r.SNI,
+			r.IP, r.Port, r.SNI, r.Label,
 			fmt.Sprintf("%d", r.Latency.Milliseconds()),
+			fmtInt(r.HTTPStatus),
 			r.SourceRange,
 			boolStr(r.TCPSuccess), boolStr(r.TLSSuccess),
 			boolStr(r.HTTPSuccess), boolStr(r.HTTP2Success), boolStr(r.HTTP3Success),
