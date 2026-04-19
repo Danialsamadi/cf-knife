@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"cf-knife/internal/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +23,6 @@ Cloudflare IP scanning.`,
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		logger.Shutdown(logger.ExitConfigError, fmt.Sprintf("CLI execution failed: %v", err))
 	}
 }
