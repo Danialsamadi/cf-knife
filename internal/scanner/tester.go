@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,9 @@ type ProbeConfig struct {
 	FragmentSizes []int
 	CertCheck     bool
 	HTTPFragment  bool
+
+	// SitePreflight runs DNS+TCP(+TLS for https ports) before main probes when Hostname is set.
+	SitePreflight bool
 }
 
 // ShouldTCP returns true if TCP probing is enabled by mode or explicit flag.
@@ -67,6 +71,9 @@ func (pc *ProbeConfig) ShouldHTTP3() bool {
 // The function respects ctx for cancellation and applies per-probe retries.
 func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 	sni := pc.SNI
+	if t.Hostname != "" {
+		sni = t.Hostname
+	}
 	if t.SNI != "" {
 		sni = t.SNI
 	}
@@ -75,12 +82,42 @@ func Probe(ctx context.Context, t Target, pc *ProbeConfig) ProbeResult {
 		IP:          t.IP,
 		Port:        t.Port,
 		SNI:         sni,
+		Hostname:    t.Hostname,
 		SourceRange: t.SourceRange,
 		ScanType:    string(pc.ScanType),
 	}
 
-	addr := net.JoinHostPort(t.IP, t.Port)
 	start := time.Now()
+
+	workIP := t.IP
+	addr := net.JoinHostPort(workIP, t.Port)
+	if pc.SitePreflight && t.Hostname != "" {
+		pn, err := strconv.Atoi(t.Port)
+		if err != nil {
+			res.Error = fmt.Sprintf("preflight: invalid port: %v", err)
+			res.Latency = time.Since(start)
+			return res
+		}
+		layerTimeout := pc.Timeout / 2
+		if layerTimeout < 3*time.Second {
+			layerTimeout = 3 * time.Second
+		}
+		sc := schemeForPort(t.Port)
+		pr := PreFlightLayerCheck(ctx, t.Hostname, pn, sc, layerTimeout)
+		if pr.Status == "FATAL_ERR" {
+			time.Sleep(500 * time.Millisecond)
+		}
+		if pr.Status != "PASSED" {
+			res.Error = "preflight: " + pr.Status
+			res.Latency = time.Since(start)
+			return res
+		}
+		if pr.ResolvedIP != "" {
+			workIP = pr.ResolvedIP
+			res.IP = workIP
+		}
+		addr = net.JoinHostPort(workIP, t.Port)
+	}
 
 	// TCP — dispatch based on scan type
 	if pc.ShouldTCP() {

@@ -8,6 +8,9 @@ type Target struct {
 	Port        string
 	SourceRange string // CIDR or "single" that this IP was expanded from
 	SNI         string // per-target SNI override; empty = use ProbeConfig.SNI
+	// Hostname is the original hostname when targets come from a domain list
+	// (DNS → IP dial with SNI/Host = hostname). Empty for IP-only scans.
+	Hostname string
 }
 
 // ProbeResult holds the outcome of all enabled probes for one target.
@@ -15,6 +18,7 @@ type ProbeResult struct {
 	IP          string        `json:"ip"`
 	Port        string        `json:"port"`
 	SNI         string        `json:"sni,omitempty"`
+	Hostname    string        `json:"hostname,omitempty"`
 	SourceRange string        `json:"source_range"`
 	Latency     time.Duration `json:"latency_ms"`
 
